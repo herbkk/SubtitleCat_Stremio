@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v28',
-    version: '1.2.8',
-    name: 'SubtitleCat Subtitles',
-    description: 'Ondertitels van SubtitleCat.com (v28)',
+    id: 'org.subtitlecat.v29',
+    version: '1.2.9',
+    name: 'SubtitleCat (v29) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v29)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -35,34 +35,40 @@ function mapLanguage(lang: string): string {
 
 async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string, host?: string) {
     try {
+        // Clean title: remove year in brackets like "Title (2024)" -> "Title"
+        const cleanTitle = query.replace(/\s\(\d{4}\)$/, '').trim();
+        
         // Try multiple search variations
-        const searchQueries = [query];
+        const searchQueries = [cleanTitle];
         if (type === 'series' && season && episode) {
             const s = season.padStart(2, '0');
             const e = episode.padStart(2, '0');
-            searchQueries.unshift(`${query} S${s}E${e}`);
-            searchQueries.unshift(`${query}.${s}x${e}`);
+            searchQueries.unshift(`${cleanTitle} S${s}E${e}`);
+            searchQueries.unshift(`${cleanTitle}.${s}x${e}`);
         }
 
         let allResults: any[] = [];
         
-        for (const q of searchQueries) {
+        // Perform searches in parallel for speed
+        const searchPromises = searchQueries.map(async (q) => {
             const searchUrl = `https://subtitlecat.com/index.php?search=${encodeURIComponent(q)}`;
-            console.log(`[DEBUG] Searching SubtitleCat: ${searchUrl}`);
-            
             const response = await axios.get(searchUrl, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
                 },
-                timeout: 5000
-            });
+                timeout: 4000
+            }).catch(() => null);
+
+            if (!response || !response.data) return [];
+
             const $ = cheerio.load(response.data);
+            const localResults: any[] = [];
 
             $('table.table tr').each((i, el) => {
                 if (i === 0) return;
                 const link = $(el).find('td:nth-child(1) a');
                 const title = link.text().trim();
-                const href = link.attr('href'); // e.g. subs/1258/filename.html
+                const href = link.attr('href');
                 const lang = $(el).find('td:nth-child(2)').text().trim();
 
                 if (href && href.startsWith('subs/')) {
@@ -70,22 +76,19 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                     const subId = parts[1];
                     const filename = parts[2].replace('.html', '');
                     
-                    // Use our proxy to avoid CORS issues
                     const baseUrl = host ? `https://${host}` : '';
                     const dutchProxyUrl = `${baseUrl}/proxy/${subId}/${filename}/dutch.srt`;
                     const originalProxyUrl = `${baseUrl}/proxy/${subId}/${filename}.srt`;
 
-                    // Add Dutch translation
-                    allResults.push({
+                    localResults.push({
                         url: dutchProxyUrl,
                         lang: 'dut',
                         id: `${subId}-${filename}-dut`,
                         label: `SubtitleCat: ${title} (NL)`
                     });
 
-                    // Add original if it's not Dutch
                     if (lang.toLowerCase() !== 'dutch') {
-                        allResults.push({
+                        localResults.push({
                             url: originalProxyUrl,
                             lang: mapLanguage(lang),
                             id: `${subId}-${filename}-orig`,
@@ -94,13 +97,15 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                     }
                 }
             });
-            
-            if (allResults.length > 0) break; // Stop if we found something
-        }
+            return localResults;
+        });
+
+        const resultsArray = await Promise.all(searchPromises);
+        allResults = resultsArray.flat();
         
-        // Remove duplicates
-        const uniqueResults = Array.from(new Map(allResults.map(item => [item.url, item])).values());
-        console.log(`[DEBUG] Found ${uniqueResults.length} unique subtitle options`);
+        // Remove duplicates and limit results
+        const uniqueResults = Array.from(new Map(allResults.map(item => [item.url, item])).values()).slice(0, 20);
+        console.log(`[DEBUG] Found ${uniqueResults.length} unique subtitle options for "${cleanTitle}"`);
         return uniqueResults;
     } catch (e) {
         console.error('SubtitleCat search error:', e);
@@ -198,7 +203,9 @@ async function createServer() {
     app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
         try {
             const { id, filename, lang } = req.params;
-            const downloadPath = lang ? `${filename}/${lang}` : filename;
+            // Ensure filename doesn't have .srt already, then add it
+            const cleanFilename = filename.replace('.srt', '');
+            const downloadPath = lang ? `${cleanFilename}/${lang}.srt` : `${cleanFilename}.srt`;
             const url = `https://subtitlecat.com/download/${id}/${downloadPath}`;
             
             console.log(`[DEBUG] Proxying subtitle: ${url}`);
