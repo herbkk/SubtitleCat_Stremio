@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v37',
-    version: '1.3.7',
-    name: 'SubtitleCat (v37) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v37)',
+    id: 'org.subtitlecat.v38',
+    version: '1.3.8',
+    name: 'SubtitleCat (v38) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v38)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -40,16 +40,16 @@ const LANG_MAP: Record<string, string> = {
     'shqip': 'sqi'
 };
 
-function mapLanguage(lang: string): string {
-    // Strictly allow only known languages, default to 'eng'
+function mapLanguage(lang: string): string | null {
+    // Remove emojis and non-alphabetic characters
     const cleanLang = lang.replace(/[^a-zA-Z]/g, '').toLowerCase();
-    if (!cleanLang) return 'eng';
+    if (!cleanLang) return null;
     
     // Check if it's already a 3-letter code we support
     const values = Object.values(LANG_MAP);
     if (values.includes(cleanLang)) return cleanLang;
     
-    return LANG_MAP[cleanLang] || 'eng';
+    return LANG_MAP[cleanLang] || null;
 }
 
 async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string, host?: string) {
@@ -88,18 +88,18 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                 const link = $(el).find('td:nth-child(1) a');
                 const title = link.text().trim();
                 const href = link.attr('href');
-                const lang = $(el).find('td:nth-child(2)').text().trim();
+                const rawLang = $(el).find('td:nth-child(2)').text().trim();
 
                 if (href && href.startsWith('subs/')) {
                     const parts = href.split('/');
                     const subId = parts[1];
-                    const filename = parts[2].replace('.html', ''); // Keep original encoding (with + etc)
+                    const filename = parts[2].replace('.html', '');
                     
                     const baseUrl = host ? `https://${host}` : '';
                     const dutchProxyUrl = `${baseUrl}/proxy/${subId}/${filename}/dutch.srt`;
                     const originalProxyUrl = `${baseUrl}/proxy/${subId}/${filename}.srt`;
 
-                    // Add Dutch translation
+                    // Always add Dutch translation
                     localResults.push({
                         url: dutchProxyUrl,
                         lang: 'nld',
@@ -107,14 +107,13 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                         label: `SubtitleCat: ${title} (NL)`
                     });
 
-                    const mappedLang = mapLanguage(lang);
-                    // Only add original if it's not Dutch (to avoid duplicates)
-                    if (lang.toLowerCase().replace(/[^a-zA-Z]/g, '') !== 'dutch') {
+                    const mappedLang = mapLanguage(rawLang);
+                    if (mappedLang && mappedLang !== 'nld') {
                         localResults.push({
                             url: originalProxyUrl,
                             lang: mappedLang,
                             id: `${subId}-${filename}-orig`,
-                            label: `SubtitleCat: ${title} (${lang})`
+                            label: `SubtitleCat: ${title} (${rawLang})`
                         });
                     }
                 }
@@ -205,19 +204,20 @@ async function createServer() {
             
             // Clean parameters
             const cleanId = id.replace('.json', '');
-            const cleanExtra = extra ? extra.replace('.json', '') : '';
+            const cleanExtra = (extra || '').replace('.json', '');
             
-            // Parse requested language from extra (e.g. "language=nld")
+            // Parse requested language from extra (e.g. "language=nld" or just "nld")
             let requestedLang = '';
             if (cleanExtra.includes('language=')) {
                 requestedLang = cleanExtra.split('language=')[1].split('&')[0];
+            } else if (cleanExtra.length === 3) {
+                requestedLang = cleanExtra;
             }
             
             console.log(`[DEBUG] Subtitle request: type=${type}, id=${cleanId}, lang=${requestedLang}`);
 
             const meta = await getMetadata(type, cleanId);
             if (!meta) {
-                console.log(`[DEBUG] No metadata found for ${cleanId}`);
                 return res.json({ subtitles: [] });
             }
 
@@ -231,12 +231,12 @@ async function createServer() {
             const host = req.headers.host;
             const allSubtitles = await searchSubtitleCat(meta.name, type, season, episode, host);
             
-            // Filter by requested language if Stremio provided one
-            let filteredSubtitles = allSubtitles;
-            if (requestedLang) {
-                filteredSubtitles = allSubtitles.filter(s => s.lang === requestedLang);
-            }
+            // STRICT FILTERING: Only return the language Stremio asked for
+            // If no language is requested, default to Dutch for this addon
+            const targetLang = requestedLang || 'nld';
+            const filteredSubtitles = allSubtitles.filter(s => s.lang === targetLang);
             
+            console.log(`[DEBUG] Returning ${filteredSubtitles.length} subtitles for language: ${targetLang}`);
             res.json({ subtitles: filteredSubtitles });
         } catch (err) {
             console.error('Subtitle route error:', err);
@@ -248,25 +248,21 @@ async function createServer() {
     app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
         const { id, filename, lang } = req.params;
         try {
-            // SubtitleCat is extremely picky about URLs.
-            // The 'filename' from req.params is already partially decoded by Express.
-            // We need to reconstruct the path exactly as SubtitleCat expects it.
+            // 1. Handle double encoding from Stremio (%2520 -> %20 -> space)
+            let decodedFilename = decodeURIComponent(decodeURIComponent(filename));
+            
+            // 2. Re-encode for SubtitleCat (they use '+' for spaces)
+            const catFilename = decodedFilename.replace(/ /g, '+');
             
             let downloadPath = '';
             if (lang) {
-                // lang is usually "dutch.srt"
                 const cleanLang = lang.replace('.srt', '');
-                downloadPath = `${filename}/${cleanLang}.srt`;
+                downloadPath = `${catFilename}/${cleanLang}.srt`;
             } else {
-                // Ensure it ends with .srt
-                downloadPath = filename.endsWith('.srt') ? filename : `${filename}.srt`;
+                downloadPath = catFilename.endsWith('.srt') ? catFilename : `${catFilename}.srt`;
             }
             
-            // SubtitleCat uses '+' for spaces in filenames. 
-            // Express might have converted them or kept them.
-            // We ensure spaces are '+' and other chars are encoded.
             const url = `https://subtitlecat.com/download/${id}/${downloadPath}`;
-            
             console.log(`[DEBUG] Proxying to SubtitleCat: ${url}`);
             
             const response = await axios.get(url, {
@@ -276,11 +272,9 @@ async function createServer() {
                     'Referer': 'https://subtitlecat.com/',
                     'Accept': '*/*'
                 },
-                timeout: 30000,
-                maxRedirects: 5
+                timeout: 30000
             });
 
-            // Set headers for maximum Stremio compatibility
             res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
