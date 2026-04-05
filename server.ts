@@ -5,17 +5,16 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v33',
-    version: '1.3.3',
-    name: 'SubtitleCat (v33) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v33)',
+    id: 'org.subtitlecat.v34',
+    version: '1.3.4',
+    name: 'SubtitleCat (v34) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v34)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
 };
 
-// Language mapping from SubtitleCat names to Stremio codes
-// Stremio uses ISO 639-2/B (3 letters). nld is often more compatible than dut.
+// Language mapping from SubtitleCat names to Stremio codes (ISO 639-2/B)
 const LANG_MAP: Record<string, string> = {
     'dutch': 'nld',
     'english': 'eng',
@@ -26,7 +25,17 @@ const LANG_MAP: Record<string, string> = {
     'portuguese': 'por',
     'russian': 'rus',
     'turkish': 'tur',
-    'polish': 'pol'
+    'polish': 'pol',
+    'hebrew': 'heb',
+    'arabic': 'ara',
+    'czech': 'cze',
+    'hungarian': 'hun',
+    'romanian': 'rum',
+    'greek': 'gre',
+    'danish': 'dan',
+    'swedish': 'swe',
+    'norwegian': 'nor',
+    'finnish': 'fin'
 };
 
 function mapLanguage(lang: string): string {
@@ -186,20 +195,18 @@ async function createServer() {
             const cleanId = id.replace('.json', '');
             const cleanExtra = extra ? extra.replace('.json', '') : '';
             
-            console.log(`[DEBUG] Subtitle request: type=${type}, id=${cleanId}, extra=${cleanExtra}`);
-
-            // 1. Always add a debug subtitle to confirm connectivity
-            const debugSub = {
-                url: 'https://raw.githubusercontent.com/thehunmonkgroup/stremio-xml-subtitles/master/test.srt',
-                lang: 'nld',
-                id: 'debug-connection-ok',
-                label: 'SubtitleCat: [DEBUG] Verbinding OK'
-            };
+            // Parse requested language from extra (e.g. "language=nld")
+            let requestedLang = '';
+            if (cleanExtra.includes('language=')) {
+                requestedLang = cleanExtra.split('language=')[1].split('&')[0];
+            }
+            
+            console.log(`[DEBUG] Subtitle request: type=${type}, id=${cleanId}, lang=${requestedLang}`);
 
             const meta = await getMetadata(type, cleanId);
             if (!meta) {
                 console.log(`[DEBUG] No metadata found for ${cleanId}`);
-                return res.json({ subtitles: [debugSub] });
+                return res.json({ subtitles: [] });
             }
 
             let season, episode;
@@ -210,10 +217,15 @@ async function createServer() {
             }
 
             const host = req.headers.host;
-            const subtitles = await searchSubtitleCat(meta.name, type, season, episode, host);
+            const allSubtitles = await searchSubtitleCat(meta.name, type, season, episode, host);
             
-            // Combine debug sub with real results
-            res.json({ subtitles: [debugSub, ...subtitles] });
+            // Filter by requested language if Stremio provided one
+            let filteredSubtitles = allSubtitles;
+            if (requestedLang) {
+                filteredSubtitles = allSubtitles.filter(s => s.lang === requestedLang);
+            }
+            
+            res.json({ subtitles: filteredSubtitles });
         } catch (err) {
             console.error('Subtitle route error:', err);
             res.json({ subtitles: [] });
@@ -227,7 +239,9 @@ async function createServer() {
             // Ensure filename doesn't have .srt already, then add it
             const cleanFilename = filename.replace('.srt', '');
             const downloadPath = lang ? `${cleanFilename}/${lang}.srt` : `${cleanFilename}.srt`;
-            const url = `https://subtitlecat.com/download/${id}/${downloadPath}`;
+            
+            // Use encodeURI to handle spaces and special characters in the filename
+            const url = encodeURI(`https://subtitlecat.com/download/${id}/${downloadPath}`);
             
             console.log(`[DEBUG] Proxying subtitle: ${url}`);
             
@@ -237,15 +251,18 @@ async function createServer() {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                     'Referer': 'https://subtitlecat.com/'
                 },
-                timeout: 10000
+                timeout: 15000
             });
 
-            // Set headers for Stremio compatibility
-            res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+            // Set headers for maximum Stremio compatibility
+            res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', '*');
-            res.send(response.data);
+            res.setHeader('Vary', 'Origin');
+            
+            // Send the buffer directly
+            res.send(Buffer.from(response.data));
         } catch (e: any) {
             console.error('Proxy error:', e.message);
             res.status(404).send('Subtitle not found');
@@ -262,9 +279,23 @@ async function createServer() {
     
     if (isProd) {
         console.log(`Serving static files from ${distPath}`);
-        app.use(express.static(distPath));
-        app.get('*', (req, res) => {
-            res.sendFile(indexHtmlPath);
+        // Ensure the dist directory exists
+        app.use(express.static(distPath, {
+            index: 'index.html',
+            extensions: ['html', 'js', 'css']
+        }));
+        
+        app.get('*', (req, res, next) => {
+            // If it's an API route or manifest, don't serve index.html
+            if (req.url.startsWith('/subtitles') || req.url.startsWith('/proxy') || req.url.includes('manifest')) {
+                return next();
+            }
+            res.sendFile(indexHtmlPath, (err) => {
+                if (err) {
+                    console.error('Error sending index.html:', err);
+                    res.status(500).send('Frontend not found. Please run build.');
+                }
+            });
         });
     } else {
         console.log('Using Vite middleware for development');
