@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v26',
-    version: '1.2.6',
+    id: 'org.subtitlecat.v27',
+    version: '1.2.7',
     name: 'SubtitleCat Subtitles',
-    description: 'Ondertitels van SubtitleCat.com (v26)',
+    description: 'Ondertitels van SubtitleCat.com (v27)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -134,10 +134,10 @@ async function createServer() {
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, HEAD');
         res.setHeader('Access-Control-Allow-Headers', '*');
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        return res.status(200).json(MANIFEST);
+        return res.json(MANIFEST);
     };
 
-    // Multiple paths for maximum compatibility
+    // Multiple paths for maximum compatibility - MUST BE BEFORE OTHER ROUTES
     app.get('/manifest.json', serveManifest);
     app.get('/manifest.v2.json', serveManifest);
     app.get('/manifest', serveManifest);
@@ -147,13 +147,14 @@ async function createServer() {
         const ua = (req.headers['user-agent'] || '').toLowerCase();
         const accept = (req.headers['accept'] || '').toLowerCase();
         
-        // If it's Stremio or any non-browser request, serve manifest
-        const isBrowser = ua.includes('mozilla') || ua.includes('chrome') || ua.includes('safari');
+        // If it's Stremio, or requesting JSON, or NOT a browser, serve manifest
         const isStremio = ua.includes('stremio') || accept.includes('json') || req.query.stremio === 'true';
+        const isBrowser = ua.includes('mozilla') || ua.includes('chrome') || ua.includes('safari');
         
         if (isStremio || !isBrowser) {
             return serveManifest(req, res);
         }
+        // Otherwise, it's a browser, so let it fall through to the frontend
         next();
     });
 
