@@ -64,7 +64,7 @@ export default function App() {
             {isReady !== null && (
               <div className="flex gap-2 absolute -top-3 -right-3">
                 <div className="px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest border shadow-lg bg-indigo-500/20 border-indigo-500/40 text-indigo-400">
-                  v21
+                  v22
                 </div>
                 <div className={`px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest border shadow-lg ${isReady ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-rose-500/20 border-rose-500/40 text-rose-400'}`}>
                   {isReady ? '● Online' : '● Offline'}
@@ -82,8 +82,8 @@ export default function App() {
               <Info className="w-5 h-5 shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold mb-1">⚠️ Belangrijke waarschuwing</p>
-                <p>Je gebruikt een <strong>Preview URL</strong>. Stremio kan deze URL vaak niet bereiken vanwege het Google Preview Splash-scherm.</p>
-                <p className="mt-2 text-xs opacity-80">Oplossing: Gebruik de <strong>"Deploy to Cloud Run"</strong> optie in het menu rechtsboven om een echte publieke URL te krijgen.</p>
+                <p>Je gebruikt een <strong>Preview URL</strong>. Stremio kan deze URL vaak niet bereiken vanwege het Google Preview Splash-scherm of Vercel Deployment Protection.</p>
+                <p className="mt-2 text-xs opacity-80">Oplossing: Gebruik de <strong>"Deploy to Cloud Run"</strong> optie of gebruik de <strong>Production URL</strong> in Vercel (zonder de willekeurige tekens in de naam).</p>
               </div>
             </div>
           )}

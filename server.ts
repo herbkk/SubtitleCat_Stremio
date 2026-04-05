@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v21',
-    version: '1.2.1',
+    id: 'org.subtitlecat.v22',
+    version: '1.2.2',
     name: 'SubtitleCat',
-    description: 'Ondertitels van SubtitleCat.com (v21)',
+    description: 'Ondertitels van SubtitleCat.com (v22)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -87,17 +87,12 @@ async function createServer() {
     const app = express();
     const PORT = process.env.PORT || 3000;
 
-    // 1. NUCLEAR CORS FIX (Highest priority, before anything else)
-    app.use((req, res, next) => {
-        res.header('Access-Control-Allow-Origin', '*');
-        res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, HEAD');
-        res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Stremio-User, X-Stremio-App');
-        
-        if (req.method === 'OPTIONS') {
-            return res.status(200).send();
-        }
-        next();
-    });
+    // Use official cors middleware for better compatibility
+    app.use(cors({
+        origin: '*',
+        methods: ['GET', 'POST', 'OPTIONS', 'HEAD'],
+        allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'X-Stremio-User', 'X-Stremio-App']
+    }));
 
     app.use(express.json());
 
