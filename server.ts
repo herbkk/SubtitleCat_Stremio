@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v22',
-    version: '1.2.2',
+    id: 'org.subtitlecat.v23',
+    version: '1.2.3',
     name: 'SubtitleCat',
-    description: 'Ondertitels van SubtitleCat.com (v22)',
+    description: 'Ondertitels van SubtitleCat.com (v23)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -102,20 +102,15 @@ async function createServer() {
         next();
     });
 
-    // 3. Manifest Serving (Highest priority - Super-Nuclear Headers)
+    // 3. Manifest Serving (Highest priority)
     const serveManifest = (req: any, res: any) => {
         console.log(`[DEBUG] Serving manifest to: ${req.headers['user-agent']}`);
-        res.writeHead(200, {
-            'Content-Type': 'application/json; charset=utf-8',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
-            'Access-Control-Allow-Headers': '*',
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0',
-            'Access-Control-Max-Age': '86400'
-        });
-        res.end(JSON.stringify(MANIFEST));
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, HEAD');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.status(200).json(MANIFEST);
     };
 
     // Multiple paths for maximum compatibility
@@ -127,9 +122,12 @@ async function createServer() {
     app.get('/', (req, res, next) => {
         const ua = (req.headers['user-agent'] || '').toLowerCase();
         const accept = (req.headers['accept'] || '').toLowerCase();
-        const isStremio = ua.includes('stremio') || accept.includes('json') || req.query.stremio === 'true' || req.query.format === 'json';
         
-        if (isStremio) {
+        // If it's Stremio or any non-browser request, serve manifest
+        const isBrowser = ua.includes('mozilla') || ua.includes('chrome') || ua.includes('safari');
+        const isStremio = ua.includes('stremio') || accept.includes('json') || req.query.stremio === 'true';
+        
+        if (isStremio || !isBrowser) {
             return serveManifest(req, res);
         }
         next();
