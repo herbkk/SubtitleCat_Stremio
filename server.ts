@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v35',
-    version: '1.3.5',
-    name: 'SubtitleCat (v35) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v35)',
+    id: 'org.subtitlecat.v36',
+    version: '1.3.6',
+    name: 'SubtitleCat (v36) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v36)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -41,9 +41,14 @@ const LANG_MAP: Record<string, string> = {
 };
 
 function mapLanguage(lang: string): string {
-    // Remove emojis and non-alphabetic characters, then lowercase
+    // Strictly allow only known languages, default to 'eng'
     const cleanLang = lang.replace(/[^a-zA-Z]/g, '').toLowerCase();
     if (!cleanLang) return 'eng';
+    
+    // Check if it's already a 3-letter code we support
+    const values = Object.values(LANG_MAP);
+    if (values.includes(cleanLang)) return cleanLang;
+    
     return LANG_MAP[cleanLang] || 'eng';
 }
 
@@ -242,17 +247,29 @@ async function createServer() {
 
     // Proxy route to handle CORS and direct downloads
     app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
+        const { id, filename, lang } = req.params;
         try {
-            const { id, filename, lang } = req.params;
-            // The filename might be double-encoded or contain special chars
-            const decodedFilename = decodeURIComponent(filename);
-            const cleanFilename = decodedFilename.replace('.srt', '');
-            const downloadPath = lang ? `${cleanFilename}/${lang}.srt` : `${cleanFilename}.srt`;
+            // 1. Decode and clean the base filename
+            let baseName = decodeURIComponent(filename);
+            if (baseName.toLowerCase().endsWith('.srt')) {
+                baseName = baseName.slice(0, -4);
+            }
             
-            // SubtitleCat expects a very specific URL structure
-            const url = `https://subtitlecat.com/download/${id}/${downloadPath}`;
+            // 2. Construct the SubtitleCat download path
+            let downloadPath = '';
+            if (lang) {
+                // lang is something like "dutch.srt"
+                const cleanLang = lang.replace('.srt', '');
+                downloadPath = `${baseName}/${cleanLang}.srt`;
+            } else {
+                downloadPath = `${baseName}.srt`;
+            }
             
-            console.log(`[DEBUG] Proxying subtitle: ${url}`);
+            // 3. Encode the path components individually for maximum safety
+            const encodedPath = downloadPath.split('/').map(part => encodeURIComponent(part)).join('/');
+            const url = `https://subtitlecat.com/download/${id}/${encodedPath}`;
+            
+            console.log(`[DEBUG] Proxying to SubtitleCat: ${url}`);
             
             const response = await axios.get(url, {
                 responseType: 'arraybuffer',
@@ -261,20 +278,22 @@ async function createServer() {
                     'Referer': 'https://subtitlecat.com/',
                     'Accept': '*/*'
                 },
-                timeout: 20000
+                timeout: 25000,
+                validateStatus: (status) => status === 200
             });
 
             // Set headers for maximum Stremio compatibility
-            res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+            // text/plain is often the most reliable for SRT across all Stremio platforms
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', '*');
-            res.setHeader('Cache-Control', 'public, max-age=3600');
+            res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24h
             
             res.send(Buffer.from(response.data));
         } catch (e: any) {
-            console.error('Proxy error:', e.message);
-            res.status(404).send('Subtitle not found');
+            console.error(`[ERROR] Proxy failed for ${id}:`, e.message);
+            res.status(404).send('Subtitle not found or SubtitleCat error');
         }
     });
 
@@ -290,12 +309,13 @@ async function createServer() {
         console.log(`Serving static files from ${distPath}`);
         app.use(express.static(distPath));
         
+        // Handle SPA routing
         app.get('*', (req, res, next) => {
-            // If it's an API route or manifest, don't serve index.html
-            if (req.url.startsWith('/subtitles') || req.url.startsWith('/proxy') || req.url.includes('manifest')) {
+            const url = req.url;
+            if (url.startsWith('/subtitles') || url.startsWith('/proxy') || url.includes('manifest')) {
                 return next();
             }
-            res.sendFile(indexHtmlPath);
+            res.sendFile(path.join(distPath, 'index.html'));
         });
     } else {
         console.log('Using Vite middleware for development');
