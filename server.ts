@@ -5,11 +5,11 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v40',
-    version: '1.4.0',
-    name: 'SubtitleCat (v40) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v40)',
-    logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png', // Cat icon for Stremio UI
+    id: 'org.subtitlecat.v41',
+    version: '1.4.1',
+    name: 'SubtitleCat (v41) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v41)',
+    logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -249,53 +249,65 @@ async function createServer() {
     // Proxy route to handle CORS and direct downloads
     app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
         const { id, filename, lang } = req.params;
+        let finalUrl = '';
         try {
             // 1. Robust decoding of the filename
-            // Stremio/Express can double or triple encode. We decode until it's stable.
             let current = filename;
             let decoded = filename;
             try {
-                while (true) {
-                    decoded = decodeURIComponent(current);
-                    if (decoded === current) break;
-                    current = decoded;
+                // Decode multiple times to handle nested encoding
+                for (let i = 0; i < 3; i++) {
+                    const next = decodeURIComponent(current);
+                    if (next === current) break;
+                    current = next;
                 }
+                decoded = current;
             } catch (e) {
-                // If it fails, use the last successful decode
+                decoded = filename;
             }
             
-            // 2. SubtitleCat expects spaces as '+' and specific encoding
-            // We use the raw decoded string and then manually replace spaces with '+'
-            const catFilename = decoded.replace(/ /g, '+');
+            // 2. SubtitleCat expects specific encoding:
+            // - Spaces as '+'
+            // - [ as %5B
+            // - ] as %5D
+            // - Other chars encoded
+            const safeFilename = encodeURIComponent(decoded)
+                .replace(/%20/g, '+')
+                .replace(/\(/g, '%28')
+                .replace(/\)/g, '%29')
+                .replace(/'/g, '%27')
+                .replace(/\*/g, '%2A')
+                .replace(/!/g, '%21')
+                .replace(/~/g, '%7E');
             
             let downloadPath = '';
             if (lang) {
                 const cleanLang = lang.replace('.srt', '');
-                downloadPath = `${catFilename}/${cleanLang}.srt`;
+                downloadPath = `${safeFilename}/${cleanLang}.srt`;
             } else {
-                downloadPath = catFilename.endsWith('.srt') ? catFilename : `${catFilename}.srt`;
+                downloadPath = safeFilename.endsWith('.srt') ? safeFilename : `${safeFilename}.srt`;
             }
             
             // 3. Construct the final URL
-            // We use encodeURI on the whole thing to handle [ ] etc, but then fix the '+'
-            const url = `https://subtitlecat.com/download/${id}/${downloadPath}`;
-            const finalUrl = encodeURI(url).replace(/%20/g, '+');
+            finalUrl = `https://subtitlecat.com/download/${id}/${downloadPath}`;
             
             console.log(`[DEBUG] Proxying to SubtitleCat: ${finalUrl}`);
             
             const response = await axios.get(finalUrl, {
                 responseType: 'arraybuffer',
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-                    'Referer': 'https://subtitlecat.com/',
-                    'Accept': '*/*'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Referer': `https://subtitlecat.com/subs/${id}/${safeFilename}.html`,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Connection': 'keep-alive'
                 },
                 timeout: 30000,
                 maxRedirects: 5
             });
 
             // Set headers for maximum Stremio compatibility
-            res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', '*');
@@ -304,7 +316,8 @@ async function createServer() {
             res.send(Buffer.from(response.data));
         } catch (e: any) {
             console.error(`[ERROR] Proxy failed for ${id}:`, e.message);
-            res.status(404).send('Subtitle not found');
+            // Provide more info in the error response for debugging
+            res.status(500).send(`Subtitle Proxy Error: ${e.message}\nTarget URL: ${finalUrl}`);
         }
     });
 
