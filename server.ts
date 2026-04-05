@@ -5,18 +5,19 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v32',
-    version: '1.3.2',
-    name: 'SubtitleCat (v32) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v32)',
+    id: 'org.subtitlecat.v33',
+    version: '1.3.3',
+    name: 'SubtitleCat (v33) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v33)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
 };
 
 // Language mapping from SubtitleCat names to Stremio codes
+// Stremio uses ISO 639-2/B (3 letters). nld is often more compatible than dut.
 const LANG_MAP: Record<string, string> = {
-    'dutch': 'dut',
+    'dutch': 'nld',
     'english': 'eng',
     'french': 'fre',
     'german': 'ger',
@@ -82,8 +83,8 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
 
                     localResults.push({
                         url: dutchProxyUrl,
-                        lang: 'dut',
-                        id: `${subId}-${filename}-dut`,
+                        lang: 'nld',
+                        id: `${subId}-${filename}-nld`,
                         label: `SubtitleCat: ${title} (NL)`
                     });
 
@@ -190,7 +191,7 @@ async function createServer() {
             // 1. Always add a debug subtitle to confirm connectivity
             const debugSub = {
                 url: 'https://raw.githubusercontent.com/thehunmonkgroup/stremio-xml-subtitles/master/test.srt',
-                lang: 'dut',
+                lang: 'nld',
                 id: 'debug-connection-ok',
                 label: 'SubtitleCat: [DEBUG] Verbinding OK'
             };
@@ -239,8 +240,11 @@ async function createServer() {
                 timeout: 10000
             });
 
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            // Set headers for Stremio compatibility
+            res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', '*');
             res.send(response.data);
         } catch (e: any) {
             console.error('Proxy error:', e.message);
@@ -249,16 +253,18 @@ async function createServer() {
     });
 
     // 4. Frontend Setup
+    // Use __dirname for more reliable path resolution on Vercel
     const distPath = path.resolve(process.cwd(), 'dist');
+    const indexHtmlPath = path.join(distPath, 'index.html');
     
     // Check environment based on NODE_ENV or APP_URL
     const isProd = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1' || process.env.K_SERVICE !== undefined;
     
     if (isProd) {
-        console.log('Serving static files from dist');
+        console.log(`Serving static files from ${distPath}`);
         app.use(express.static(distPath));
         app.get('*', (req, res) => {
-            res.sendFile(path.join(distPath, 'index.html'));
+            res.sendFile(indexHtmlPath);
         });
     } else {
         console.log('Using Vite middleware for development');
