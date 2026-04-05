@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v50',
-    version: '1.5.0',
-    name: 'SubtitleCat (v50) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v50)',
+    id: 'org.subtitlecat.v51',
+    version: '1.5.1',
+    name: 'SubtitleCat (v51) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v51)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -66,6 +66,10 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
             searchQueries.unshift(`${cleanTitle} S${s}E${e}`);
             searchQueries.unshift(`${cleanTitle}.${s}x${e}`);
         }
+        
+        // Add Dutch specific searches to find native Dutch entries
+        searchQueries.push(`${cleanTitle} Dutch`);
+        searchQueries.push(`${cleanTitle} Nederlands`);
 
         let allResults: any[] = [];
         
@@ -260,18 +264,9 @@ async function createServer() {
 
         const commonHeaders = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'Sec-Ch-Ua': '"Chromium";v="123", "Not:A-Brand";v="8"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1'
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9,nl;q=0.8',
+            'Cache-Control': 'no-cache'
         };
 
         const fetchFile = async (url: string) => {
@@ -283,7 +278,7 @@ async function createServer() {
                         ...commonHeaders,
                         'Referer': `https://subtitlecat.com/subs/${id}`
                     },
-                    timeout: 30000, // Increased to 30s for on-the-fly generation
+                    timeout: 30000,
                     maxRedirects: 5,
                     validateStatus: (status) => status === 200
                 });
@@ -302,7 +297,8 @@ async function createServer() {
 
             // Strategy 1: Scrape the page to find the EXACT link (Most Reliable)
             try {
-                const pageUrl = `https://subtitlecat.com/subs/${id}`;
+                // Use the full filename for the scrape URL as SubtitleCat might be sensitive to it
+                const pageUrl = `https://subtitlecat.com/subs/${id}/${filename}.html`;
                 console.log(`[DEBUG] Step 2: Scraping page for real link: ${pageUrl}`);
                 const pageRes = await axios.get(pageUrl, {
                     headers: commonHeaders,
@@ -370,13 +366,20 @@ async function createServer() {
                 for (const pathAttempt of pathsToTry) {
                     for (const strat of strategies) {
                         try {
-                            let cleanPath = decodeURIComponent(pathAttempt);
-                            let encodedPath = cleanPath;
-                            if (strat.plus) encodedPath = encodedPath.replace(/ /g, '+');
-                            else encodedPath = encodedPath.replace(/ /g, '%20');
+                            const cleanPath = decodeURIComponent(pathAttempt);
+                            let encodedPath = "";
+                            // Manual encoding to prevent double encoding and allow specific characters
+                            for (let i = 0; i < cleanPath.length; i++) {
+                                const char = cleanPath[i];
+                                if (char === ' ') {
+                                    encodedPath += strat.plus ? '+' : '%20';
+                                } else if (/[a-zA-Z0-9\+\-\.\_\/\(\)\[\],]/.test(char)) {
+                                    encodedPath += char;
+                                } else {
+                                    encodedPath += encodeURIComponent(char);
+                                }
+                            }
                             
-                            // Include comma in whitelist as per user's direct URL example
-                            encodedPath = encodedPath.replace(/[^a-zA-Z0-9\+\-\.\_\/\(\)\[\],]/g, (c) => encodeURIComponent(c));
                             const prefix = strat.subs ? 'subs' : 'download';
                             const url = `https://subtitlecat.com/${prefix}/${id}/${encodedPath}`;
                             
