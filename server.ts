@@ -5,14 +5,33 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v23',
-    version: '1.2.3',
-    name: 'SubtitleCat',
-    description: 'Ondertitels van SubtitleCat.com (v23)',
+    id: 'org.subtitlecat.v24',
+    version: '1.2.4',
+    name: 'SubtitleCat Subtitles',
+    description: 'Ondertitels van SubtitleCat.com (v24)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
 };
+
+// Language mapping from SubtitleCat names to Stremio codes
+const LANG_MAP: Record<string, string> = {
+    'dutch': 'dut',
+    'english': 'eng',
+    'french': 'fre',
+    'german': 'ger',
+    'spanish': 'spa',
+    'italian': 'ita',
+    'portuguese': 'por',
+    'russian': 'rus',
+    'turkish': 'tur',
+    'polish': 'pol'
+};
+
+function mapLanguage(lang: string): string {
+    const l = lang.toLowerCase();
+    return LANG_MAP[l] || l;
+}
 
 // Helper to get title from IMDb ID using Cinemeta
 async function getMetadata(type: string, id: string) {
@@ -28,7 +47,16 @@ async function getMetadata(type: string, id: string) {
 
 async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string) {
     try {
-        const searchUrl = `https://www.subtitlecat.com/index.php?search=${encodeURIComponent(query)}`;
+        let searchQuery = query;
+        if (type === 'series' && season && episode) {
+            const s = season.padStart(2, '0');
+            const e = episode.padStart(2, '0');
+            searchQuery = `${query} S${s}E${e}`;
+        }
+
+        const searchUrl = `https://subtitlecat.com/index.php?search=${encodeURIComponent(searchQuery)}`;
+        console.log(`[DEBUG] Searching SubtitleCat: ${searchUrl}`);
+        
         const response = await axios.get(searchUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -45,20 +73,33 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
             const lang = $(el).find('td:nth-child(2)').text().trim();
 
             if (href) {
+                // Flexible matching for series
                 if (type === 'series' && season && episode) {
                     const s = season.padStart(2, '0');
                     const e = episode.padStart(2, '0');
-                    const pattern = new RegExp(`S${s}E${e}`, 'i');
-                    if (!pattern.test(title)) return;
+                    const sShort = season;
+                    const eShort = episode;
+                    
+                    const patterns = [
+                        new RegExp(`S${s}E${e}`, 'i'),
+                        new RegExp(`${sShort}x${e}`, 'i'),
+                        new RegExp(`${sShort}x${eShort}`, 'i'),
+                        new RegExp(`S${sShort}E${eShort}`, 'i')
+                    ];
+                    
+                    const matches = patterns.some(p => p.test(title));
+                    if (!matches && !title.toLowerCase().includes(query.toLowerCase())) return;
                 }
+
                 results.push({
                     id: href,
-                    url: `https://www.subtitlecat.com/${href}`,
-                    lang: lang.toLowerCase(),
-                    label: `${lang} - ${title}`
+                    url: `https://subtitlecat.com/${href}`,
+                    lang: mapLanguage(lang),
+                    label: `SubtitleCat: ${title}`
                 });
             }
         });
+        console.log(`[DEBUG] Found ${results.length} results`);
         return results;
     } catch (e) {
         console.error('SubtitleCat search error:', e);
@@ -68,7 +109,7 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
 
 async function getDownloadLink(subPath: string) {
     try {
-        const url = `https://www.subtitlecat.com/${subPath}`;
+        const url = `https://subtitlecat.com/${subPath}`;
         const response = await axios.get(url, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -76,7 +117,7 @@ async function getDownloadLink(subPath: string) {
         });
         const $ = cheerio.load(response.data);
         const downloadHref = $('a[href^="download/"]').attr('href');
-        return downloadHref ? `https://www.subtitlecat.com/${downloadHref}` : null;
+        return downloadHref ? `https://subtitlecat.com/${downloadHref}` : null;
     } catch (e) {
         console.error('SubtitleCat download link error:', e);
         return null;
