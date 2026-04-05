@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v27',
-    version: '1.2.7',
+    id: 'org.subtitlecat.v28',
+    version: '1.2.8',
     name: 'SubtitleCat Subtitles',
-    description: 'Ondertitels van SubtitleCat.com (v27)',
+    description: 'Ondertitels van SubtitleCat.com (v28)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -33,62 +33,75 @@ function mapLanguage(lang: string): string {
     return LANG_MAP[l] || l;
 }
 
-async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string) {
+async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string, host?: string) {
     try {
-        // SubtitleCat search works better with dots for scene releases
-        let searchQuery = query.replace(/\s+/g, '.');
+        // Try multiple search variations
+        const searchQueries = [query];
         if (type === 'series' && season && episode) {
             const s = season.padStart(2, '0');
             const e = episode.padStart(2, '0');
-            searchQuery = `${searchQuery}.S${s}E${e}`;
+            searchQueries.unshift(`${query} S${s}E${e}`);
+            searchQueries.unshift(`${query}.${s}x${e}`);
         }
 
-        const searchUrl = `https://subtitlecat.com/index.php?search=${encodeURIComponent(searchQuery)}`;
-        console.log(`[DEBUG] Searching SubtitleCat: ${searchUrl}`);
+        let allResults: any[] = [];
         
-        const response = await axios.get(searchUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        });
-        const $ = cheerio.load(response.data);
-        const results: any[] = [];
+        for (const q of searchQueries) {
+            const searchUrl = `https://subtitlecat.com/index.php?search=${encodeURIComponent(q)}`;
+            console.log(`[DEBUG] Searching SubtitleCat: ${searchUrl}`);
+            
+            const response = await axios.get(searchUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                },
+                timeout: 5000
+            });
+            const $ = cheerio.load(response.data);
 
-        $('table.table tr').each((i, el) => {
-            if (i === 0) return;
-            const link = $(el).find('td:nth-child(1) a');
-            const title = link.text().trim();
-            const href = link.attr('href'); // e.g. subs/1258/filename.html
-            const lang = $(el).find('td:nth-child(2)').text().trim();
+            $('table.table tr').each((i, el) => {
+                if (i === 0) return;
+                const link = $(el).find('td:nth-child(1) a');
+                const title = link.text().trim();
+                const href = link.attr('href'); // e.g. subs/1258/filename.html
+                const lang = $(el).find('td:nth-child(2)').text().trim();
 
-            if (href && href.startsWith('subs/')) {
-                // Construct direct download links
-                // Original: subs/ID/NAME.html -> download/ID/NAME.srt
-                // Dutch: subs/ID/NAME.html -> download/ID/NAME/dutch.srt
-                const baseDownloadPath = href.replace('subs/', 'download/').replace('.html', '');
-                const originalDownloadUrl = `https://subtitlecat.com/${baseDownloadPath}.srt`;
-                const dutchDownloadUrl = `https://subtitlecat.com/${baseDownloadPath}/dutch.srt`;
+                if (href && href.startsWith('subs/')) {
+                    const parts = href.split('/');
+                    const subId = parts[1];
+                    const filename = parts[2].replace('.html', '');
+                    
+                    // Use our proxy to avoid CORS issues
+                    const baseUrl = host ? `https://${host}` : '';
+                    const dutchProxyUrl = `${baseUrl}/proxy/${subId}/${filename}/dutch.srt`;
+                    const originalProxyUrl = `${baseUrl}/proxy/${subId}/${filename}.srt`;
 
-                // Add original if it matches
-                results.push({
-                    url: originalDownloadUrl,
-                    lang: mapLanguage(lang),
-                    id: href,
-                    label: `SubtitleCat: ${title} (${lang})`
-                });
+                    // Add Dutch translation
+                    allResults.push({
+                        url: dutchProxyUrl,
+                        lang: 'dut',
+                        id: `${subId}-${filename}-dut`,
+                        label: `SubtitleCat: ${title} (NL)`
+                    });
 
-                // ALWAYS add Dutch translation for every result found
-                results.push({
-                    url: dutchDownloadUrl,
-                    lang: 'dut',
-                    id: `${href}-dutch`,
-                    label: `SubtitleCat: ${title} (NL Vertaling)`
-                });
-            }
-        });
+                    // Add original if it's not Dutch
+                    if (lang.toLowerCase() !== 'dutch') {
+                        allResults.push({
+                            url: originalProxyUrl,
+                            lang: mapLanguage(lang),
+                            id: `${subId}-${filename}-orig`,
+                            label: `SubtitleCat: ${title} (${lang})`
+                        });
+                    }
+                }
+            });
+            
+            if (allResults.length > 0) break; // Stop if we found something
+        }
         
-        console.log(`[DEBUG] Found ${results.length} subtitle options`);
-        return results;
+        // Remove duplicates
+        const uniqueResults = Array.from(new Map(allResults.map(item => [item.url, item])).values());
+        console.log(`[DEBUG] Found ${uniqueResults.length} unique subtitle options`);
+        return uniqueResults;
     } catch (e) {
         console.error('SubtitleCat search error:', e);
         return [];
@@ -172,11 +185,39 @@ async function createServer() {
                 episode = parts[2];
             }
 
-            const subtitles = await searchSubtitleCat(meta.name, type, season, episode);
+            const host = req.headers.host;
+            const subtitles = await searchSubtitleCat(meta.name, type, season, episode, host);
             res.json({ subtitles });
         } catch (err) {
             console.error('Subtitle route error:', err);
             res.status(500).json({ subtitles: [] });
+        }
+    });
+
+    // Proxy route to handle CORS and direct downloads
+    app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
+        try {
+            const { id, filename, lang } = req.params;
+            const downloadPath = lang ? `${filename}/${lang}` : filename;
+            const url = `https://subtitlecat.com/download/${id}/${downloadPath}`;
+            
+            console.log(`[DEBUG] Proxying subtitle: ${url}`);
+            
+            const response = await axios.get(url, {
+                responseType: 'arraybuffer',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Referer': 'https://subtitlecat.com/'
+                },
+                timeout: 10000
+            });
+
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.send(response.data);
+        } catch (e: any) {
+            console.error('Proxy error:', e.message);
+            res.status(404).send('Subtitle not found');
         }
     });
 
