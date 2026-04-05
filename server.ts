@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v25',
-    version: '1.2.5',
+    id: 'org.subtitlecat.v26',
+    version: '1.2.6',
     name: 'SubtitleCat Subtitles',
-    description: 'Ondertitels van SubtitleCat.com (v25)',
+    description: 'Ondertitels van SubtitleCat.com (v26)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
