@@ -84,9 +84,9 @@ async function getDownloadLink(subPath: string) {
     }
 }
 
-async function startServer() {
+async function createServer() {
     const app = express();
-    const PORT = 3000;
+    const PORT = process.env.PORT || 3000;
 
     // 1. NUCLEAR CORS FIX (Highest priority, before anything else)
     app.use((req, res, next) => {
@@ -173,7 +173,7 @@ async function startServer() {
     const distPath = path.resolve(process.cwd(), 'dist');
     
     // Check environment based on NODE_ENV or APP_URL
-    const isProd = process.env.NODE_ENV === 'production' || process.env.APP_URL?.includes('ais-pre') || process.env.K_SERVICE !== undefined;
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1' || process.env.K_SERVICE !== undefined;
     
     if (isProd) {
         console.log('Serving static files from dist');
@@ -190,11 +190,19 @@ async function startServer() {
         app.use(vite.middlewares);
     }
 
-    app.listen(PORT, '0.0.0.0', () => {
-        console.log(`Addon server listening on 0.0.0.0:${PORT}`);
-    });
+    return app;
 }
 
-startServer().catch(err => {
-    console.error('Server failed to start:', err);
-});
+// Export the app for Vercel
+const appPromise = createServer();
+export default appPromise;
+
+// Only listen if not on Vercel
+if (!process.env.VERCEL) {
+    appPromise.then(app => {
+        const PORT = process.env.PORT || 3000;
+        app.listen(PORT, '0.0.0.0', () => {
+            console.log(`Addon server listening on 0.0.0.0:${PORT}`);
+        });
+    });
+}
