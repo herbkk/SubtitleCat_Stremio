@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v36',
-    version: '1.3.6',
-    name: 'SubtitleCat (v36) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v36)',
+    id: 'org.subtitlecat.v37',
+    version: '1.3.7',
+    name: 'SubtitleCat (v37) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v37)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -93,13 +93,11 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                 if (href && href.startsWith('subs/')) {
                     const parts = href.split('/');
                     const subId = parts[1];
-                    const filename = parts[2].replace('.html', '');
+                    const filename = parts[2].replace('.html', ''); // Keep original encoding (with + etc)
                     
                     const baseUrl = host ? `https://${host}` : '';
-                    // Use encodeURIComponent for the filename part of the proxy URL
-                    const safeFilename = encodeURIComponent(filename);
-                    const dutchProxyUrl = `${baseUrl}/proxy/${subId}/${safeFilename}/dutch.srt`;
-                    const originalProxyUrl = `${baseUrl}/proxy/${subId}/${safeFilename}.srt`;
+                    const dutchProxyUrl = `${baseUrl}/proxy/${subId}/${filename}/dutch.srt`;
+                    const originalProxyUrl = `${baseUrl}/proxy/${subId}/${filename}.srt`;
 
                     // Add Dutch translation
                     localResults.push({
@@ -110,6 +108,7 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                     });
 
                     const mappedLang = mapLanguage(lang);
+                    // Only add original if it's not Dutch (to avoid duplicates)
                     if (lang.toLowerCase().replace(/[^a-zA-Z]/g, '') !== 'dutch') {
                         localResults.push({
                             url: originalProxyUrl,
@@ -249,25 +248,24 @@ async function createServer() {
     app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
         const { id, filename, lang } = req.params;
         try {
-            // 1. Decode and clean the base filename
-            let baseName = decodeURIComponent(filename);
-            if (baseName.toLowerCase().endsWith('.srt')) {
-                baseName = baseName.slice(0, -4);
-            }
+            // SubtitleCat is extremely picky about URLs.
+            // The 'filename' from req.params is already partially decoded by Express.
+            // We need to reconstruct the path exactly as SubtitleCat expects it.
             
-            // 2. Construct the SubtitleCat download path
             let downloadPath = '';
             if (lang) {
-                // lang is something like "dutch.srt"
+                // lang is usually "dutch.srt"
                 const cleanLang = lang.replace('.srt', '');
-                downloadPath = `${baseName}/${cleanLang}.srt`;
+                downloadPath = `${filename}/${cleanLang}.srt`;
             } else {
-                downloadPath = `${baseName}.srt`;
+                // Ensure it ends with .srt
+                downloadPath = filename.endsWith('.srt') ? filename : `${filename}.srt`;
             }
             
-            // 3. Encode the path components individually for maximum safety
-            const encodedPath = downloadPath.split('/').map(part => encodeURIComponent(part)).join('/');
-            const url = `https://subtitlecat.com/download/${id}/${encodedPath}`;
+            // SubtitleCat uses '+' for spaces in filenames. 
+            // Express might have converted them or kept them.
+            // We ensure spaces are '+' and other chars are encoded.
+            const url = `https://subtitlecat.com/download/${id}/${downloadPath}`;
             
             console.log(`[DEBUG] Proxying to SubtitleCat: ${url}`);
             
@@ -278,22 +276,21 @@ async function createServer() {
                     'Referer': 'https://subtitlecat.com/',
                     'Accept': '*/*'
                 },
-                timeout: 25000,
-                validateStatus: (status) => status === 200
+                timeout: 30000,
+                maxRedirects: 5
             });
 
             // Set headers for maximum Stremio compatibility
-            // text/plain is often the most reliable for SRT across all Stremio platforms
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', '*');
-            res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24h
+            res.setHeader('Cache-Control', 'public, max-age=86400');
             
             res.send(Buffer.from(response.data));
         } catch (e: any) {
             console.error(`[ERROR] Proxy failed for ${id}:`, e.message);
-            res.status(404).send('Subtitle not found or SubtitleCat error');
+            res.status(404).send('Subtitle not found');
         }
     });
 
