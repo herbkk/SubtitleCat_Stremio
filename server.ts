@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v44',
-    version: '1.4.4',
-    name: 'SubtitleCat (v44) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v44)',
+    id: 'org.subtitlecat.v45',
+    version: '1.4.5',
+    name: 'SubtitleCat (v45) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v45)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -254,18 +254,19 @@ async function createServer() {
             // SubtitleCat is extremely picky about spaces and brackets.
             let cleanPath = decodeURIComponent(subPath);
             
-            // Explicitly encode brackets as SubtitleCat servers often require this
-            let encodedPath = encodeURIComponent(cleanPath)
-                .replace(/%2F/g, '/') // Keep slashes for paths
-                .replace(/\(/g, '%28')
-                .replace(/\)/g, '%29')
-                .replace(/\[/g, '%5B')
-                .replace(/\]/g, '%5D');
-
+            // Minimal encoding: only encode what's strictly necessary
+            // SubtitleCat often prefers literal brackets and parentheses
+            let encodedPath = cleanPath;
             if (usePlus) {
-                encodedPath = encodedPath.replace(/%20/g, '+');
+                encodedPath = encodedPath.replace(/ /g, '+');
+            } else {
+                encodedPath = encodedPath.replace(/ /g, '%20');
             }
             
+            // Encode other potentially problematic characters but keep common ones literal
+            // We use a whitelist approach for safety
+            encodedPath = encodedPath.replace(/[^a-zA-Z0-9\+\-\.\_\/\(\)\[\]]/g, (c) => encodeURIComponent(c));
+
             const prefix = useSubsPrefix ? 'subs' : 'download';
             const url = `https://subtitlecat.com/${prefix}/${id}/${encodedPath}`;
             
@@ -289,9 +290,32 @@ async function createServer() {
         try {
             let response;
             const baseName = filename.replace(/\.srt$/i, '');
-            const targetPath = lang ? `${filename}/${lang.replace('.srt', '')}.srt` : (filename.endsWith('.srt') ? filename : `${filename}.srt`);
+            
+            // Define all possible paths to try
+            const pathsToTry: string[] = [];
+            
+            if (lang) {
+                const langName = lang.replace('.srt', '').toLowerCase();
+                const langSuffix = langName === 'dutch' ? 'nl' : langName.substring(0, 2);
+                
+                // Pattern 1: filename/dutch.srt (Standard download route)
+                pathsToTry.push(`${filename}/${langName}.srt`);
+                pathsToTry.push(`${baseName}/${langName}.srt`);
+                
+                // Pattern 2: filename-nl.srt (Direct subs route)
+                pathsToTry.push(`${baseName}-${langSuffix}.srt`);
+                pathsToTry.push(`${filename}-${langSuffix}.srt`);
+                
+                // Pattern 3: filename.dutch.srt
+                pathsToTry.push(`${baseName}.${langName}.srt`);
+            } else {
+                // Original file
+                pathsToTry.push(filename.endsWith('.srt') ? filename : `${filename}.srt`);
+                pathsToTry.push(baseName + '.srt');
+                pathsToTry.push(baseName);
+            }
 
-            // Strategy: Try multiple combinations of prefix and space encoding
+            // Strategy: Try each path with both + and %20, and both /download/ and /subs/
             const strategies = [
                 { plus: true, subs: false }, // /download/...+...
                 { plus: false, subs: false }, // /download/...%20...
@@ -300,26 +324,24 @@ async function createServer() {
             ];
 
             let lastError = null;
-            for (const strategy of strategies) {
-                try {
-                    response = await tryDownload(targetPath, strategy.plus, strategy.subs);
-                    break; // Success!
-                } catch (e) {
-                    lastError = e;
-                    // If it's a translation, also try without .srt in the middle path for this strategy
-                    if (lang) {
-                        try {
-                            const altPath = `${baseName}/${lang.replace('.srt', '')}.srt`;
-                            response = await tryDownload(altPath, strategy.plus, strategy.subs);
-                            break; // Success!
-                        } catch (e2) {
-                            lastError = e2;
-                        }
+            let success = false;
+
+            for (const pathAttempt of pathsToTry) {
+                for (const strategy of strategies) {
+                    try {
+                        response = await tryDownload(pathAttempt, strategy.plus, strategy.subs);
+                        success = true;
+                        break;
+                    } catch (e) {
+                        lastError = e;
                     }
                 }
+                if (success) break;
             }
 
-            if (!response) throw lastError || new Error('All download strategies failed');
+            if (!success || !response) {
+                throw lastError || new Error('All download strategies failed');
+            }
 
             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
