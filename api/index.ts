@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v48',
-    version: '1.4.8',
-    name: 'SubtitleCat (v48) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v48)',
+    id: 'org.subtitlecat.v49',
+    version: '1.4.9',
+    name: 'SubtitleCat (v49) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v49)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -258,17 +258,30 @@ async function createServer() {
         const lang = parts.length > 1 ? parts[1] : null;
         const langName = lang ? lang.replace('.srt', '').toLowerCase() : 'english';
 
+        const commonHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Sec-Ch-Ua': '"Chromium";v="123", "Not:A-Brand";v="8"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
+        };
+
         const fetchFile = async (url: string) => {
             console.log(`[DEBUG] Step 3: Final Download Attempt: ${url}`);
             try {
                 const res = await axios.get(url, {
                     responseType: 'arraybuffer',
                     headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                        'Referer': `https://subtitlecat.com/subs/${id}`,
-                        'Accept': '*/*',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Cache-Control': 'no-cache'
+                        ...commonHeaders,
+                        'Referer': `https://subtitlecat.com/subs/${id}`
                     },
                     timeout: 15000,
                     maxRedirects: 5,
@@ -292,8 +305,8 @@ async function createServer() {
                 const pageUrl = `https://subtitlecat.com/subs/${id}`;
                 console.log(`[DEBUG] Step 2: Scraping page for real link: ${pageUrl}`);
                 const pageRes = await axios.get(pageUrl, {
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' },
-                    timeout: 8000
+                    headers: commonHeaders,
+                    timeout: 10000
                 });
                 const $ = cheerio.load(pageRes.data);
                 
@@ -338,6 +351,12 @@ async function createServer() {
                     pathsToTry.push(`${baseName}/${langName}.srt`);
                     pathsToTry.push(`${baseName}-${langSuffix}.srt`);
                     pathsToTry.push(`${filename}-${langSuffix}.srt`);
+                    // Try with comma replaced by space or removed
+                    if (filename.includes(',')) {
+                        const noComma = filename.replace(/,/g, '');
+                        pathsToTry.push(`${noComma}/${langName}.srt`);
+                        pathsToTry.push(`${noComma}-${langSuffix}.srt`);
+                    }
                 } else {
                     pathsToTry.push(filename.endsWith('.srt') ? filename : `${filename}.srt`);
                     pathsToTry.push(baseName + '.srt');
