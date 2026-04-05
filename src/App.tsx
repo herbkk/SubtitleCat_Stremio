@@ -1,5 +1,5 @@
 import { useState, useEffect, ReactNode } from 'react';
-import { Download, ExternalLink, Info, ShieldCheck } from 'lucide-react';
+import { Download, ExternalLink, Info, ShieldCheck, Cat } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export default function App() {
@@ -55,16 +55,11 @@ export default function App() {
           className="text-center space-y-8"
         >
           <div className="inline-flex items-center justify-center p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 mb-4 relative">
-            <img 
-              src="https://subtitlecat.com/img/logo.png" 
-              alt="SubtitleCat Logo" 
-              className="h-16 w-auto"
-              referrerPolicy="no-referrer"
-            />
+            <Cat className="w-16 h-16 text-indigo-400" />
             {isReady !== null && (
               <div className="flex gap-2 absolute -top-3 -right-3">
                 <div className="px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest border shadow-lg bg-indigo-500/20 border-indigo-500/40 text-indigo-400">
-                  v38
+                  v39
                 </div>
                 <div className={`px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest border shadow-lg ${isReady ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-rose-500/20 border-rose-500/40 text-rose-400'}`}>
                   {isReady ? '● Online' : '● Offline'}

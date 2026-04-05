@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v38',
-    version: '1.3.8',
-    name: 'SubtitleCat (v38) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v38)',
+    id: 'org.subtitlecat.v39',
+    version: '1.3.9',
+    name: 'SubtitleCat (v39) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v39)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -93,7 +93,8 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                 if (href && href.startsWith('subs/')) {
                     const parts = href.split('/');
                     const subId = parts[1];
-                    const filename = parts[2].replace('.html', '');
+                    // Decode filename once here so it's "clean" when passed to Stremio
+                    const filename = decodeURIComponent(parts[2].replace('.html', ''));
                     
                     const baseUrl = host ? `https://${host}` : '';
                     const dutchProxyUrl = `${baseUrl}/proxy/${subId}/${filename}/dutch.srt`;
@@ -248,11 +249,22 @@ async function createServer() {
     app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
         const { id, filename, lang } = req.params;
         try {
-            // 1. Handle double encoding from Stremio (%2520 -> %20 -> space)
-            let decodedFilename = decodeURIComponent(decodeURIComponent(filename));
+            // 1. Handle potential double encoding from Stremio/Express
+            // We want the raw string with spaces.
+            let rawFilename = filename;
+            try {
+                // Try double decoding first
+                rawFilename = decodeURIComponent(decodeURIComponent(filename));
+            } catch (e) {
+                try {
+                    rawFilename = decodeURIComponent(filename);
+                } catch (e2) {
+                    rawFilename = filename;
+                }
+            }
             
-            // 2. Re-encode for SubtitleCat (they use '+' for spaces)
-            const catFilename = decodedFilename.replace(/ /g, '+');
+            // 2. SubtitleCat expects spaces as '+' in the download path
+            const catFilename = rawFilename.replace(/ /g, '+');
             
             let downloadPath = '';
             if (lang) {
@@ -262,10 +274,14 @@ async function createServer() {
                 downloadPath = catFilename.endsWith('.srt') ? catFilename : `${catFilename}.srt`;
             }
             
+            // 3. Construct URL and handle special characters like [ ]
+            // SubtitleCat is very picky. We encode the path but keep the '+' for spaces.
             const url = `https://subtitlecat.com/download/${id}/${downloadPath}`;
-            console.log(`[DEBUG] Proxying to SubtitleCat: ${url}`);
+            const encodedUrl = encodeURI(url).replace(/%20/g, '+');
             
-            const response = await axios.get(url, {
+            console.log(`[DEBUG] Proxying to SubtitleCat: ${encodedUrl}`);
+            
+            const response = await axios.get(encodedUrl, {
                 responseType: 'arraybuffer',
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
