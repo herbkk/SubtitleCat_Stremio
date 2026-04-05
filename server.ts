@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v29',
-    version: '1.2.9',
-    name: 'SubtitleCat (v29) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v29)',
+    id: 'org.subtitlecat.v30',
+    version: '1.3.0',
+    name: 'SubtitleCat (v30) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v30)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -176,26 +176,36 @@ async function createServer() {
         next();
     });
 
-    // Subtitle route
-    app.get('/subtitles/:type/:id/:extra?.json', async (req, res) => {
+    // Subtitle route - Support both formats Stremio uses
+    app.get(['/subtitles/:type/:id.json', '/subtitles/:type/:id/:extra.json'], async (req, res) => {
         try {
-            const { type, id } = req.params;
-            const meta = await getMetadata(type, id);
-            if (!meta) return res.json({ subtitles: [] });
+            let { type, id, extra } = req.params;
+            
+            // Clean ID (remove .json if it leaked into the ID parameter)
+            const cleanId = id.replace('.json', '');
+            console.log(`[DEBUG] Subtitle request for ${type} ${cleanId} (extra: ${extra})`);
+
+            const meta = await getMetadata(type, cleanId);
+            if (!meta) {
+                console.log(`[DEBUG] No metadata found for ${cleanId}`);
+                return res.json({ subtitles: [] });
+            }
 
             let season, episode;
             if (type === 'series') {
-                const parts = id.split(':');
+                const parts = cleanId.split(':');
                 season = parts[1];
                 episode = parts[2];
             }
 
             const host = req.headers.host;
             const subtitles = await searchSubtitleCat(meta.name, type, season, episode, host);
+            
+            // Add a small delay to ensure Stremio doesn't timeout too fast
             res.json({ subtitles });
         } catch (err) {
             console.error('Subtitle route error:', err);
-            res.status(500).json({ subtitles: [] });
+            res.json({ subtitles: [] });
         }
     });
 
