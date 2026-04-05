@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v49',
-    version: '1.4.9',
-    name: 'SubtitleCat (v49) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v49)',
+    id: 'org.subtitlecat.v50',
+    version: '1.5.0',
+    name: 'SubtitleCat (v50) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v50)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -283,7 +283,7 @@ async function createServer() {
                         ...commonHeaders,
                         'Referer': `https://subtitlecat.com/subs/${id}`
                     },
-                    timeout: 15000,
+                    timeout: 30000, // Increased to 30s for on-the-fly generation
                     maxRedirects: 5,
                     validateStatus: (status) => status === 200
                 });
@@ -375,7 +375,8 @@ async function createServer() {
                             if (strat.plus) encodedPath = encodedPath.replace(/ /g, '+');
                             else encodedPath = encodedPath.replace(/ /g, '%20');
                             
-                            encodedPath = encodedPath.replace(/[^a-zA-Z0-9\+\-\.\_\/\(\)\[\]]/g, (c) => encodeURIComponent(c));
+                            // Include comma in whitelist as per user's direct URL example
+                            encodedPath = encodedPath.replace(/[^a-zA-Z0-9\+\-\.\_\/\(\)\[\],]/g, (c) => encodeURIComponent(c));
                             const prefix = strat.subs ? 'subs' : 'download';
                             const url = `https://subtitlecat.com/${prefix}/${id}/${encodedPath}`;
                             
