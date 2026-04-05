@@ -5,11 +5,11 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v41',
-    version: '1.4.1',
-    name: 'SubtitleCat (v41) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v41)',
-    logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
+    id: 'org.subtitlecat.v42',
+    version: '1.4.2',
+    name: 'SubtitleCat (v42) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v42)',
+    logo: 'https://www.subtitlecat.com/img/logo.png', // Use original logo but we'll proxy it if needed, or use a reliable CDN
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -94,8 +94,8 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                 if (href && href.startsWith('subs/')) {
                     const parts = href.split('/');
                     const subId = parts[1];
-                    // Decode filename once here so it's "clean" when passed to Stremio
-                    const filename = decodeURIComponent(parts[2].replace('.html', ''));
+                    // Keep the filename as it is in the URL (encoded)
+                    const filename = parts[2].replace('.html', '');
                     
                     const baseUrl = host ? `https://${host}` : '';
                     const dutchProxyUrl = `${baseUrl}/proxy/${subId}/${filename}/dutch.srt`;
@@ -249,64 +249,59 @@ async function createServer() {
     // Proxy route to handle CORS and direct downloads
     app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
         const { id, filename, lang } = req.params;
-        let finalUrl = '';
-        try {
-            // 1. Robust decoding of the filename
-            let current = filename;
-            let decoded = filename;
-            try {
-                // Decode multiple times to handle nested encoding
-                for (let i = 0; i < 3; i++) {
-                    const next = decodeURIComponent(current);
-                    if (next === current) break;
-                    current = next;
-                }
-                decoded = current;
-            } catch (e) {
-                decoded = filename;
-            }
+        
+        const tryDownload = async (subPath: string) => {
+            // SubtitleCat expects spaces as '+'
+            // We decode first to ensure we have a clean string, then replace spaces
+            const decodedPath = decodeURIComponent(subPath);
+            const catPath = decodedPath.replace(/ /g, '+');
             
-            // 2. SubtitleCat expects specific encoding:
-            // - Spaces as '+'
-            // - [ as %5B
-            // - ] as %5D
-            // - Other chars encoded
-            const safeFilename = encodeURIComponent(decoded)
-                .replace(/%20/g, '+')
-                .replace(/\(/g, '%28')
-                .replace(/\)/g, '%29')
-                .replace(/'/g, '%27')
-                .replace(/\*/g, '%2A')
-                .replace(/!/g, '%21')
-                .replace(/~/g, '%7E');
+            // We use encodeURI to handle special chars but keep literal [ ] if possible
+            // Actually, SubtitleCat is fine with encoded [ ] as long as spaces are +
+            const url = `https://subtitlecat.com/download/${id}/${catPath}`;
+            const finalUrl = encodeURI(url).replace(/%20/g, '+');
             
-            let downloadPath = '';
-            if (lang) {
-                const cleanLang = lang.replace('.srt', '');
-                downloadPath = `${safeFilename}/${cleanLang}.srt`;
-            } else {
-                downloadPath = safeFilename.endsWith('.srt') ? safeFilename : `${safeFilename}.srt`;
-            }
+            console.log(`[DEBUG] Trying SubtitleCat: ${finalUrl}`);
             
-            // 3. Construct the final URL
-            finalUrl = `https://subtitlecat.com/download/${id}/${downloadPath}`;
-            
-            console.log(`[DEBUG] Proxying to SubtitleCat: ${finalUrl}`);
-            
-            const response = await axios.get(finalUrl, {
+            return await axios.get(finalUrl, {
                 responseType: 'arraybuffer',
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': `https://subtitlecat.com/subs/${id}/${safeFilename}.html`,
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Connection': 'keep-alive'
+                    'Referer': `https://subtitlecat.com/subs/${id}`,
+                    'Accept': '*/*'
                 },
-                timeout: 30000,
+                timeout: 15000,
                 maxRedirects: 5
             });
+        };
 
-            // Set headers for maximum Stremio compatibility
+        try {
+            let response;
+            // Remove .srt from filename for translation path fallback
+            const cleanFilename = filename.replace(/\.srt$/i, '');
+            
+            if (lang) {
+                const langName = lang.replace('.srt', '');
+                try {
+                    // Try 1: filename/dutch.srt
+                    response = await tryDownload(`${filename}/${langName}.srt`);
+                } catch (e) {
+                    // Try 2: filename_without_srt/dutch.srt
+                    console.log(`[DEBUG] Fallback 1 failed, trying without .srt in path`);
+                    response = await tryDownload(`${cleanFilename}/${langName}.srt`);
+                }
+            } else {
+                try {
+                    // Try 1: filename.srt
+                    const target = filename.endsWith('.srt') ? filename : `${filename}.srt`;
+                    response = await tryDownload(target);
+                } catch (e) {
+                    // Try 2: filename (SubtitleCat sometimes adds .srt automatically)
+                    console.log(`[DEBUG] Fallback 1 failed, trying raw filename`);
+                    response = await tryDownload(cleanFilename);
+                }
+            }
+
             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -316,8 +311,7 @@ async function createServer() {
             res.send(Buffer.from(response.data));
         } catch (e: any) {
             console.error(`[ERROR] Proxy failed for ${id}:`, e.message);
-            // Provide more info in the error response for debugging
-            res.status(500).send(`Subtitle Proxy Error: ${e.message}\nTarget URL: ${finalUrl}`);
+            res.status(404).send(`Subtitle not found. Error: ${e.message}`);
         }
     });
 
