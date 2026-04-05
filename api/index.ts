@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v47',
-    version: '1.4.7',
-    name: 'SubtitleCat (v47) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v47)',
+    id: 'org.subtitlecat.v48',
+    version: '1.4.8',
+    name: 'SubtitleCat (v48) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v48)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -259,30 +259,38 @@ async function createServer() {
         const langName = lang ? lang.replace('.srt', '').toLowerCase() : 'english';
 
         const fetchFile = async (url: string) => {
-            console.log(`[DEBUG] Final Download Attempt: ${url}`);
-            return await axios.get(url, {
-                responseType: 'arraybuffer',
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                    'Referer': `https://subtitlecat.com/subs/${id}`,
-                    'Accept': '*/*',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Cache-Control': 'no-cache'
-                },
-                timeout: 15000,
-                maxRedirects: 5,
-                validateStatus: (status) => status === 200
-            });
+            console.log(`[DEBUG] Step 3: Final Download Attempt: ${url}`);
+            try {
+                const res = await axios.get(url, {
+                    responseType: 'arraybuffer',
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                        'Referer': `https://subtitlecat.com/subs/${id}`,
+                        'Accept': '*/*',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Cache-Control': 'no-cache'
+                    },
+                    timeout: 15000,
+                    maxRedirects: 5,
+                    validateStatus: (status) => status === 200
+                });
+                console.log(`[DEBUG] Step 4: Download Success! Size: ${res.data.length} bytes`);
+                return res;
+            } catch (err: any) {
+                console.error(`[DEBUG] Step 4: Download Failed! Status: ${err.response?.status}, Message: ${err.message}`);
+                throw err;
+            }
         };
 
         try {
+            console.log(`[DEBUG] Step 1: Proxy Request for ID: ${id}, Lang: ${langName}, File: ${filename}`);
             let response;
             let success = false;
 
             // Strategy 1: Scrape the page to find the EXACT link (Most Reliable)
             try {
                 const pageUrl = `https://subtitlecat.com/subs/${id}`;
-                console.log(`[DEBUG] Scraping page for real link: ${pageUrl}`);
+                console.log(`[DEBUG] Step 2: Scraping page for real link: ${pageUrl}`);
                 const pageRes = await axios.get(pageUrl, {
                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' },
                     timeout: 8000
@@ -297,7 +305,10 @@ async function createServer() {
                         (langName === 'dutch' && (currentLang.includes('nederlands') || currentLang.includes('dutch')))) {
                         downloadPath = $(el).find('a[href^="/download/"]').attr('href') || 
                                        $(el).find('a[href^="/subs/"]').attr('href') || '';
-                        if (downloadPath) return false; // Break loop
+                        if (downloadPath) {
+                            console.log(`[DEBUG] Step 2: Found link in table for ${currentLang}: ${downloadPath}`);
+                            return false; // Break loop
+                        }
                     }
                 });
 
