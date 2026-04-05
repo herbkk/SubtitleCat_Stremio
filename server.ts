@@ -5,11 +5,11 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v42',
-    version: '1.4.2',
-    name: 'SubtitleCat (v42) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v42)',
-    logo: 'https://www.subtitlecat.com/img/logo.png', // Use original logo but we'll proxy it if needed, or use a reliable CDN
+    id: 'org.subtitlecat.v43',
+    version: '1.4.3',
+    name: 'SubtitleCat (v43) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v43)',
+    logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -250,59 +250,62 @@ async function createServer() {
     app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
         const { id, filename, lang } = req.params;
         
-        const tryDownload = async (subPath: string) => {
-            // SubtitleCat expects spaces as '+'
-            // We decode first to ensure we have a clean string, then replace spaces
-            const decodedPath = decodeURIComponent(subPath);
-            const catPath = decodedPath.replace(/ /g, '+');
+        const tryDownload = async (subPath: string, usePlus: boolean) => {
+            // SubtitleCat is extremely picky about spaces.
+            // Some files need '+', some need '%20'.
+            let cleanPath = decodeURIComponent(subPath);
+            if (usePlus) {
+                cleanPath = cleanPath.replace(/ /g, '+');
+            } else {
+                cleanPath = cleanPath.replace(/ /g, '%20');
+            }
             
-            // We use encodeURI to handle special chars but keep literal [ ] if possible
-            // Actually, SubtitleCat is fine with encoded [ ] as long as spaces are +
-            const url = `https://subtitlecat.com/download/${id}/${catPath}`;
-            const finalUrl = encodeURI(url).replace(/%20/g, '+');
+            const url = `https://subtitlecat.com/download/${id}/${cleanPath}`;
+            // Final safety encode for other special chars but preserve our space choice
+            const finalUrl = encodeURI(url).replace(/%20/g, usePlus ? '+' : '%20');
             
-            console.log(`[DEBUG] Trying SubtitleCat: ${finalUrl}`);
+            console.log(`[DEBUG] Proxy attempt: ${finalUrl}`);
             
             return await axios.get(finalUrl, {
                 responseType: 'arraybuffer',
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                     'Referer': `https://subtitlecat.com/subs/${id}`,
-                    'Accept': '*/*'
+                    'Accept': '*/*',
+                    'Accept-Language': 'en-US,en;q=0.9'
                 },
-                timeout: 15000,
-                maxRedirects: 5
+                timeout: 12000,
+                maxRedirects: 5,
+                validateStatus: (status) => status === 200
             });
         };
 
         try {
             let response;
-            // Remove .srt from filename for translation path fallback
-            const cleanFilename = filename.replace(/\.srt$/i, '');
-            
-            if (lang) {
-                const langName = lang.replace('.srt', '');
+            const baseName = filename.replace(/\.srt$/i, '');
+            const targetPath = lang ? `${filename}/${lang.replace('.srt', '')}.srt` : (filename.endsWith('.srt') ? filename : `${filename}.srt`);
+
+            try {
+                // Attempt 1: Using '+' for spaces (SubtitleCat default)
+                response = await tryDownload(targetPath, true);
+            } catch (e) {
+                console.log(`[DEBUG] Attempt 1 (+) failed, trying Attempt 2 (%20)`);
                 try {
-                    // Try 1: filename/dutch.srt
-                    response = await tryDownload(`${filename}/${langName}.srt`);
-                } catch (e) {
-                    // Try 2: filename_without_srt/dutch.srt
-                    console.log(`[DEBUG] Fallback 1 failed, trying without .srt in path`);
-                    response = await tryDownload(`${cleanFilename}/${langName}.srt`);
-                }
-            } else {
-                try {
-                    // Try 1: filename.srt
-                    const target = filename.endsWith('.srt') ? filename : `${filename}.srt`;
-                    response = await tryDownload(target);
-                } catch (e) {
-                    // Try 2: filename (SubtitleCat sometimes adds .srt automatically)
-                    console.log(`[DEBUG] Fallback 1 failed, trying raw filename`);
-                    response = await tryDownload(cleanFilename);
+                    // Attempt 2: Using '%20' for spaces
+                    response = await tryDownload(targetPath, false);
+                } catch (e2) {
+                    // Attempt 3: Try without .srt in the middle path if it's a translation
+                    if (lang) {
+                        console.log(`[DEBUG] Attempt 2 failed, trying Attempt 3 (no-srt-base)`);
+                        const altPath = `${baseName}/${lang.replace('.srt', '')}.srt`;
+                        response = await tryDownload(altPath, true);
+                    } else {
+                        throw e2;
+                    }
                 }
             }
 
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', '*');
