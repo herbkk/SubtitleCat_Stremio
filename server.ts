@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v34',
-    version: '1.3.4',
-    name: 'SubtitleCat (v34) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v34)',
+    id: 'org.subtitlecat.v35',
+    version: '1.3.5',
+    name: 'SubtitleCat (v35) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v35)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -35,12 +35,16 @@ const LANG_MAP: Record<string, string> = {
     'danish': 'dan',
     'swedish': 'swe',
     'norwegian': 'nor',
-    'finnish': 'fin'
+    'finnish': 'fin',
+    'albanian': 'sqi',
+    'shqip': 'sqi'
 };
 
 function mapLanguage(lang: string): string {
-    const l = lang.toLowerCase();
-    return LANG_MAP[l] || l;
+    // Remove emojis and non-alphabetic characters, then lowercase
+    const cleanLang = lang.replace(/[^a-zA-Z]/g, '').toLowerCase();
+    if (!cleanLang) return 'eng';
+    return LANG_MAP[cleanLang] || 'eng';
 }
 
 async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string, host?: string) {
@@ -87,9 +91,12 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                     const filename = parts[2].replace('.html', '');
                     
                     const baseUrl = host ? `https://${host}` : '';
-                    const dutchProxyUrl = `${baseUrl}/proxy/${subId}/${filename}/dutch.srt`;
-                    const originalProxyUrl = `${baseUrl}/proxy/${subId}/${filename}.srt`;
+                    // Use encodeURIComponent for the filename part of the proxy URL
+                    const safeFilename = encodeURIComponent(filename);
+                    const dutchProxyUrl = `${baseUrl}/proxy/${subId}/${safeFilename}/dutch.srt`;
+                    const originalProxyUrl = `${baseUrl}/proxy/${subId}/${safeFilename}.srt`;
 
+                    // Add Dutch translation
                     localResults.push({
                         url: dutchProxyUrl,
                         lang: 'nld',
@@ -97,10 +104,11 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                         label: `SubtitleCat: ${title} (NL)`
                     });
 
-                    if (lang.toLowerCase() !== 'dutch') {
+                    const mappedLang = mapLanguage(lang);
+                    if (lang.toLowerCase().replace(/[^a-zA-Z]/g, '') !== 'dutch') {
                         localResults.push({
                             url: originalProxyUrl,
-                            lang: mapLanguage(lang),
+                            lang: mappedLang,
                             id: `${subId}-${filename}-orig`,
                             label: `SubtitleCat: ${title} (${lang})`
                         });
@@ -236,32 +244,33 @@ async function createServer() {
     app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
         try {
             const { id, filename, lang } = req.params;
-            // Ensure filename doesn't have .srt already, then add it
-            const cleanFilename = filename.replace('.srt', '');
+            // The filename might be double-encoded or contain special chars
+            const decodedFilename = decodeURIComponent(filename);
+            const cleanFilename = decodedFilename.replace('.srt', '');
             const downloadPath = lang ? `${cleanFilename}/${lang}.srt` : `${cleanFilename}.srt`;
             
-            // Use encodeURI to handle spaces and special characters in the filename
-            const url = encodeURI(`https://subtitlecat.com/download/${id}/${downloadPath}`);
+            // SubtitleCat expects a very specific URL structure
+            const url = `https://subtitlecat.com/download/${id}/${downloadPath}`;
             
             console.log(`[DEBUG] Proxying subtitle: ${url}`);
             
             const response = await axios.get(url, {
                 responseType: 'arraybuffer',
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Referer': 'https://subtitlecat.com/'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+                    'Referer': 'https://subtitlecat.com/',
+                    'Accept': '*/*'
                 },
-                timeout: 15000
+                timeout: 20000
             });
 
             // Set headers for maximum Stremio compatibility
-            res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+            res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', '*');
-            res.setHeader('Vary', 'Origin');
+            res.setHeader('Cache-Control', 'public, max-age=3600');
             
-            // Send the buffer directly
             res.send(Buffer.from(response.data));
         } catch (e: any) {
             console.error('Proxy error:', e.message);
@@ -279,23 +288,14 @@ async function createServer() {
     
     if (isProd) {
         console.log(`Serving static files from ${distPath}`);
-        // Ensure the dist directory exists
-        app.use(express.static(distPath, {
-            index: 'index.html',
-            extensions: ['html', 'js', 'css']
-        }));
+        app.use(express.static(distPath));
         
         app.get('*', (req, res, next) => {
             // If it's an API route or manifest, don't serve index.html
             if (req.url.startsWith('/subtitles') || req.url.startsWith('/proxy') || req.url.includes('manifest')) {
                 return next();
             }
-            res.sendFile(indexHtmlPath, (err) => {
-                if (err) {
-                    console.error('Error sending index.html:', err);
-                    res.status(500).send('Frontend not found. Please run build.');
-                }
-            });
+            res.sendFile(indexHtmlPath);
         });
     } else {
         console.log('Using Vite middleware for development');
