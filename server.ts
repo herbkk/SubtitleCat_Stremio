@@ -205,7 +205,7 @@ export default async (req: any, res: any) => {
 // Only listen if not on Vercel
 if (!process.env.VERCEL) {
     appPromise.then(app => {
-        const PORT = process.env.PORT || 3000;
+        const PORT = Number(process.env.PORT) || 3000;
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`Addon server listening on 0.0.0.0:${PORT}`);
         });

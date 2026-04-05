@@ -26,8 +26,6 @@ export default function App() {
     window.location.href = manifestUrl;
   };
 
-  const [debugInfo, setDebugInfo] = useState<string>('');
-
   const testManifest = async () => {
     try {
       const res = await fetch('/manifest.json?v=' + Date.now());
