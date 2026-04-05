@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v30',
-    version: '1.3.0',
-    name: 'SubtitleCat (v30) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v30)',
+    id: 'org.subtitlecat.v32',
+    version: '1.3.2',
+    name: 'SubtitleCat (v32) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v32)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -176,19 +176,29 @@ async function createServer() {
         next();
     });
 
-    // Subtitle route - Support both formats Stremio uses
-    app.get(['/subtitles/:type/:id.json', '/subtitles/:type/:id/:extra.json'], async (req, res) => {
+    // Subtitle route - Catch all variations
+    app.get('/subtitles/:type/:id/:extra?', async (req, res) => {
         try {
             let { type, id, extra } = req.params;
             
-            // Clean ID (remove .json if it leaked into the ID parameter)
+            // Clean parameters
             const cleanId = id.replace('.json', '');
-            console.log(`[DEBUG] Subtitle request for ${type} ${cleanId} (extra: ${extra})`);
+            const cleanExtra = extra ? extra.replace('.json', '') : '';
+            
+            console.log(`[DEBUG] Subtitle request: type=${type}, id=${cleanId}, extra=${cleanExtra}`);
+
+            // 1. Always add a debug subtitle to confirm connectivity
+            const debugSub = {
+                url: 'https://raw.githubusercontent.com/thehunmonkgroup/stremio-xml-subtitles/master/test.srt',
+                lang: 'dut',
+                id: 'debug-connection-ok',
+                label: 'SubtitleCat: [DEBUG] Verbinding OK'
+            };
 
             const meta = await getMetadata(type, cleanId);
             if (!meta) {
                 console.log(`[DEBUG] No metadata found for ${cleanId}`);
-                return res.json({ subtitles: [] });
+                return res.json({ subtitles: [debugSub] });
             }
 
             let season, episode;
@@ -201,8 +211,8 @@ async function createServer() {
             const host = req.headers.host;
             const subtitles = await searchSubtitleCat(meta.name, type, season, episode, host);
             
-            // Add a small delay to ensure Stremio doesn't timeout too fast
-            res.json({ subtitles });
+            // Combine debug sub with real results
+            res.json({ subtitles: [debugSub, ...subtitles] });
         } catch (err) {
             console.error('Subtitle route error:', err);
             res.json({ subtitles: [] });
