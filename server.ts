@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v43',
-    version: '1.4.3',
-    name: 'SubtitleCat (v43) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v43)',
+    id: 'org.subtitlecat.v44',
+    version: '1.4.4',
+    name: 'SubtitleCat (v44) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v44)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -250,31 +250,37 @@ async function createServer() {
     app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
         const { id, filename, lang } = req.params;
         
-        const tryDownload = async (subPath: string, usePlus: boolean) => {
-            // SubtitleCat is extremely picky about spaces.
-            // Some files need '+', some need '%20'.
+        const tryDownload = async (subPath: string, usePlus: boolean, useSubsPrefix: boolean) => {
+            // SubtitleCat is extremely picky about spaces and brackets.
             let cleanPath = decodeURIComponent(subPath);
+            
+            // Explicitly encode brackets as SubtitleCat servers often require this
+            let encodedPath = encodeURIComponent(cleanPath)
+                .replace(/%2F/g, '/') // Keep slashes for paths
+                .replace(/\(/g, '%28')
+                .replace(/\)/g, '%29')
+                .replace(/\[/g, '%5B')
+                .replace(/\]/g, '%5D');
+
             if (usePlus) {
-                cleanPath = cleanPath.replace(/ /g, '+');
-            } else {
-                cleanPath = cleanPath.replace(/ /g, '%20');
+                encodedPath = encodedPath.replace(/%20/g, '+');
             }
             
-            const url = `https://subtitlecat.com/download/${id}/${cleanPath}`;
-            // Final safety encode for other special chars but preserve our space choice
-            const finalUrl = encodeURI(url).replace(/%20/g, usePlus ? '+' : '%20');
+            const prefix = useSubsPrefix ? 'subs' : 'download';
+            const url = `https://subtitlecat.com/${prefix}/${id}/${encodedPath}`;
             
-            console.log(`[DEBUG] Proxy attempt: ${finalUrl}`);
+            console.log(`[DEBUG] Proxy attempt (${prefix}, plus=${usePlus}): ${url}`);
             
-            return await axios.get(finalUrl, {
+            return await axios.get(url, {
                 responseType: 'arraybuffer',
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                     'Referer': `https://subtitlecat.com/subs/${id}`,
                     'Accept': '*/*',
-                    'Accept-Language': 'en-US,en;q=0.9'
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Cache-Control': 'no-cache'
                 },
-                timeout: 12000,
+                timeout: 10000,
                 maxRedirects: 5,
                 validateStatus: (status) => status === 200
             });
@@ -285,27 +291,37 @@ async function createServer() {
             const baseName = filename.replace(/\.srt$/i, '');
             const targetPath = lang ? `${filename}/${lang.replace('.srt', '')}.srt` : (filename.endsWith('.srt') ? filename : `${filename}.srt`);
 
-            try {
-                // Attempt 1: Using '+' for spaces (SubtitleCat default)
-                response = await tryDownload(targetPath, true);
-            } catch (e) {
-                console.log(`[DEBUG] Attempt 1 (+) failed, trying Attempt 2 (%20)`);
+            // Strategy: Try multiple combinations of prefix and space encoding
+            const strategies = [
+                { plus: true, subs: false }, // /download/...+...
+                { plus: false, subs: false }, // /download/...%20...
+                { plus: true, subs: true },  // /subs/...+...
+                { plus: false, subs: true }   // /subs/...%20...
+            ];
+
+            let lastError = null;
+            for (const strategy of strategies) {
                 try {
-                    // Attempt 2: Using '%20' for spaces
-                    response = await tryDownload(targetPath, false);
-                } catch (e2) {
-                    // Attempt 3: Try without .srt in the middle path if it's a translation
+                    response = await tryDownload(targetPath, strategy.plus, strategy.subs);
+                    break; // Success!
+                } catch (e) {
+                    lastError = e;
+                    // If it's a translation, also try without .srt in the middle path for this strategy
                     if (lang) {
-                        console.log(`[DEBUG] Attempt 2 failed, trying Attempt 3 (no-srt-base)`);
-                        const altPath = `${baseName}/${lang.replace('.srt', '')}.srt`;
-                        response = await tryDownload(altPath, true);
-                    } else {
-                        throw e2;
+                        try {
+                            const altPath = `${baseName}/${lang.replace('.srt', '')}.srt`;
+                            response = await tryDownload(altPath, strategy.plus, strategy.subs);
+                            break; // Success!
+                        } catch (e2) {
+                            lastError = e2;
+                        }
                     }
                 }
             }
 
-            res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+            if (!response) throw lastError || new Error('All download strategies failed');
+
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', '*');
