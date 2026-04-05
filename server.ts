@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v24',
-    version: '1.2.4',
+    id: 'org.subtitlecat.v25',
+    version: '1.2.5',
     name: 'SubtitleCat Subtitles',
-    description: 'Ondertitels van SubtitleCat.com (v24)',
+    description: 'Ondertitels van SubtitleCat.com (v25)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -33,25 +33,14 @@ function mapLanguage(lang: string): string {
     return LANG_MAP[l] || l;
 }
 
-// Helper to get title from IMDb ID using Cinemeta
-async function getMetadata(type: string, id: string) {
-    try {
-        const imdbId = id.split(':')[0];
-        const response = await axios.get(`https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`);
-        return response.data.meta;
-    } catch (e) {
-        console.error('Cinemeta error:', e);
-        return null;
-    }
-}
-
 async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string) {
     try {
-        let searchQuery = query;
+        // SubtitleCat search works better with dots for scene releases
+        let searchQuery = query.replace(/\s+/g, '.');
         if (type === 'series' && season && episode) {
             const s = season.padStart(2, '0');
             const e = episode.padStart(2, '0');
-            searchQuery = `${query} S${s}E${e}`;
+            searchQuery = `${searchQuery}.S${s}E${e}`;
         }
 
         const searchUrl = `https://subtitlecat.com/index.php?search=${encodeURIComponent(searchQuery)}`;
@@ -69,37 +58,36 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
             if (i === 0) return;
             const link = $(el).find('td:nth-child(1) a');
             const title = link.text().trim();
-            const href = link.attr('href');
+            const href = link.attr('href'); // e.g. subs/1258/filename.html
             const lang = $(el).find('td:nth-child(2)').text().trim();
 
-            if (href) {
-                // Flexible matching for series
-                if (type === 'series' && season && episode) {
-                    const s = season.padStart(2, '0');
-                    const e = episode.padStart(2, '0');
-                    const sShort = season;
-                    const eShort = episode;
-                    
-                    const patterns = [
-                        new RegExp(`S${s}E${e}`, 'i'),
-                        new RegExp(`${sShort}x${e}`, 'i'),
-                        new RegExp(`${sShort}x${eShort}`, 'i'),
-                        new RegExp(`S${sShort}E${eShort}`, 'i')
-                    ];
-                    
-                    const matches = patterns.some(p => p.test(title));
-                    if (!matches && !title.toLowerCase().includes(query.toLowerCase())) return;
-                }
+            if (href && href.startsWith('subs/')) {
+                // Construct direct download links
+                // Original: subs/ID/NAME.html -> download/ID/NAME.srt
+                // Dutch: subs/ID/NAME.html -> download/ID/NAME/dutch.srt
+                const baseDownloadPath = href.replace('subs/', 'download/').replace('.html', '');
+                const originalDownloadUrl = `https://subtitlecat.com/${baseDownloadPath}.srt`;
+                const dutchDownloadUrl = `https://subtitlecat.com/${baseDownloadPath}/dutch.srt`;
 
+                // Add original if it matches
                 results.push({
-                    id: href,
-                    url: `https://subtitlecat.com/${href}`,
+                    url: originalDownloadUrl,
                     lang: mapLanguage(lang),
-                    label: `SubtitleCat: ${title}`
+                    id: href,
+                    label: `SubtitleCat: ${title} (${lang})`
+                });
+
+                // ALWAYS add Dutch translation for every result found
+                results.push({
+                    url: dutchDownloadUrl,
+                    lang: 'dut',
+                    id: `${href}-dutch`,
+                    label: `SubtitleCat: ${title} (NL Vertaling)`
                 });
             }
         });
-        console.log(`[DEBUG] Found ${results.length} results`);
+        
+        console.log(`[DEBUG] Found ${results.length} subtitle options`);
         return results;
     } catch (e) {
         console.error('SubtitleCat search error:', e);
@@ -107,19 +95,14 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
     }
 }
 
-async function getDownloadLink(subPath: string) {
+// Helper to get title from IMDb ID using Cinemeta
+async function getMetadata(type: string, id: string) {
     try {
-        const url = `https://subtitlecat.com/${subPath}`;
-        const response = await axios.get(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        });
-        const $ = cheerio.load(response.data);
-        const downloadHref = $('a[href^="download/"]').attr('href');
-        return downloadHref ? `https://subtitlecat.com/${downloadHref}` : null;
+        const imdbId = id.split(':')[0];
+        const response = await axios.get(`https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`);
+        return response.data.meta;
     } catch (e) {
-        console.error('SubtitleCat download link error:', e);
+        console.error('Cinemeta error:', e);
         return null;
     }
 }
@@ -178,7 +161,6 @@ async function createServer() {
     app.get('/subtitles/:type/:id/:extra?.json', async (req, res) => {
         try {
             const { type, id } = req.params;
-            console.log(`Subtitle request: ${type} ${id}`);
             const meta = await getMetadata(type, id);
             if (!meta) return res.json({ subtitles: [] });
 
@@ -189,13 +171,8 @@ async function createServer() {
                 episode = parts[2];
             }
 
-            const subs = await searchSubtitleCat(meta.name, type, season, episode);
-            const subtitles = await Promise.all(subs.map(async (s) => {
-                const downloadUrl = await getDownloadLink(s.id);
-                return downloadUrl ? { url: downloadUrl, lang: s.lang, id: s.id, label: s.label } : null;
-            }));
-
-            res.json({ subtitles: subtitles.filter(s => s !== null) });
+            const subtitles = await searchSubtitleCat(meta.name, type, season, episode);
+            res.json({ subtitles });
         } catch (err) {
             console.error('Subtitle route error:', err);
             res.status(500).json({ subtitles: [] });
