@@ -3,13 +3,12 @@ import path from 'path';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import cors from 'cors';
-import { createServer as createViteServer } from 'vite';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v20',
-    version: '1.2.0',
+    id: 'org.subtitlecat.v21',
+    version: '1.2.1',
     name: 'SubtitleCat',
-    description: 'Ondertitels van SubtitleCat.com (v20)',
+    description: 'Ondertitels van SubtitleCat.com (v21)',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -183,6 +182,8 @@ async function createServer() {
         });
     } else {
         console.log('Using Vite middleware for development');
+        // Dynamic import to avoid loading Vite in production/Vercel
+        const { createServer: createViteServer } = await import('vite');
         const vite = await createViteServer({
             server: { middlewareMode: true },
             appType: 'spa',
@@ -193,9 +194,13 @@ async function createServer() {
     return app;
 }
 
-// Export the app for Vercel
+// Export a function that Vercel can call
 const appPromise = createServer();
-export default appPromise;
+
+export default async (req: any, res: any) => {
+    const app = await appPromise;
+    return app(req, res);
+};
 
 // Only listen if not on Vercel
 if (!process.env.VERCEL) {
