@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v46',
-    version: '1.4.6',
-    name: 'SubtitleCat (v46) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v46)',
+    id: 'org.subtitlecat.v47',
+    version: '1.4.7',
+    name: 'SubtitleCat (v47) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v47)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -246,11 +246,18 @@ async function createServer() {
         }
     });
 
-    // Proxy route to handle CORS and direct downloads
-    app.get('/proxy/:id/:filename/:lang?', async (req, res) => {
-        const { id, filename, lang } = req.params;
-        const langName = lang ? lang.replace('.srt', '').toLowerCase() : 'english';
+    // Proxy route to handle CORS and direct downloads - using wildcard for robustness
+    app.get('/proxy/:id/*', async (req, res) => {
+        const id = req.params.id;
+        const remainingPath = req.params[0]; // Get the rest of the URL
         
+        // Parse filename and lang from the remaining path
+        // Format: filename/lang.srt or filename.srt
+        const parts = remainingPath.split('/');
+        const filename = parts[0];
+        const lang = parts.length > 1 ? parts[1] : null;
+        const langName = lang ? lang.replace('.srt', '').toLowerCase() : 'english';
+
         const fetchFile = async (url: string) => {
             console.log(`[DEBUG] Final Download Attempt: ${url}`);
             return await axios.get(url, {
@@ -285,10 +292,12 @@ async function createServer() {
                 let downloadPath = '';
                 $('table.table tbody tr').each((i, el) => {
                     const currentLang = $(el).find('td:first-child').text().trim().toLowerCase();
-                    if (currentLang === langName || 
-                        (langName === 'dutch' && (currentLang === 'nederlands' || currentLang === 'dutch'))) {
+                    // Flexible matching for language
+                    if (currentLang.includes(langName) || 
+                        (langName === 'dutch' && (currentLang.includes('nederlands') || currentLang.includes('dutch')))) {
                         downloadPath = $(el).find('a[href^="/download/"]').attr('href') || 
                                        $(el).find('a[href^="/subs/"]').attr('href') || '';
+                        if (downloadPath) return false; // Break loop
                     }
                 });
 

@@ -1,32 +1,8 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "server.ts",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "dist" }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/manifest.json",
-      "dest": "server.ts"
-    },
-    {
-      "src": "/subtitles/(.*)",
-      "dest": "server.ts"
-    },
-    {
-      "src": "/assets/(.*)",
-      "dest": "/assets/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "server.ts"
-    }
+  "rewrites": [
+    { "source": "/proxy/(.*)", "destination": "/server.ts" },
+    { "source": "/manifest.json", "destination": "/server.ts" },
+    { "source": "/subtitles/(.*)", "destination": "/server.ts" },
+    { "source": "/(.*)", "destination": "/server.ts" }
   ]
 }
