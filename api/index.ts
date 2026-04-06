@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v59',
-    version: '1.5.9',
-    name: 'SubtitleCat (v59) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v59)',
+    id: 'org.subtitlecat.v60',
+    version: '1.6.0',
+    name: 'SubtitleCat (v60) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v60)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -55,65 +55,41 @@ function mapLanguage(lang: string): string | null {
 
 async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string, host?: string, imdbId?: string, year?: string) {
     try {
+        const stealthHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://subtitlecat.com/'
+        };
+
         // Clean title: remove year in brackets like "Title (2024)" -> "Title"
         let cleanTitle = query.replace(/\s\(\d{4}\)$/, '').trim();
         
-        // Try multiple search variations
-        const searchQueries = [cleanTitle];
+        // Try multiple search variations - limit to most effective ones to avoid 403
+        const searchQueries = [];
         
-        // Add IMDb ID if available
-        if (imdbId) {
-            searchQueries.push(imdbId);
-        }
-
-        // Add title + year
-        if (year) {
-            searchQueries.push(`${cleanTitle} ${year}`);
-        }
+        if (imdbId) searchQueries.push(imdbId);
         
-        // Variation: replace & with and
-        if (cleanTitle.includes('&')) {
-            searchQueries.push(cleanTitle.replace(/&/g, 'and'));
-        }
-        
-        // Variation: remove all special characters except spaces
-        const alphaOnly = cleanTitle.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-        if (alphaOnly !== cleanTitle) {
-            searchQueries.push(alphaOnly);
-        }
-
         if (type === 'series' && season && episode) {
             const s = season.padStart(2, '0');
             const e = episode.padStart(2, '0');
-            
-            // Add SxxExx to all current variations
-            const currentVariations = [...searchQueries];
-            currentVariations.forEach(v => {
-                searchQueries.unshift(`${v} S${s}E${e}`);
-                searchQueries.unshift(`${v} ${s}x${e}`);
-            });
+            searchQueries.push(`${cleanTitle} S${s}E${e}`);
+        } else {
+            searchQueries.push(cleanTitle);
+            if (year) searchQueries.push(`${cleanTitle} ${year}`);
         }
-        
-        // Add Dutch specific searches to find native Dutch entries
-        searchQueries.push(`${cleanTitle} Dutch`);
-        searchQueries.push(`${cleanTitle} Nederlands`);
 
         let allResults: any[] = [];
         
-        // Perform searches in parallel for speed
-        const searchPromises = searchQueries.map(async (q) => {
+        // Perform searches sequentially or with small delay to avoid rate limiting
+        for (const q of searchQueries) {
             const searchUrl = `https://subtitlecat.com/index.php?search=${encodeURIComponent(q)}`;
             const response = await axios.get(searchUrl, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                    'Accept-Language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'Referer': 'https://subtitlecat.com/'
-                },
-                timeout: 6000
+                headers: stealthHeaders,
+                timeout: 7000
             }).catch(() => null);
 
-            if (!response || !response.data) return [];
+            if (!response || !response.data) continue;
 
             const $ = cheerio.load(response.data);
             const localResults: any[] = [];
@@ -124,6 +100,10 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                 const title = link.text().trim();
                 const href = link.attr('href');
                 const rawLang = $(el).find('td:nth-child(2)').text().trim();
+                
+                // Column 4 or 5 usually contains translated languages
+                const translatedLangs = $(el).find('td').text().toLowerCase();
+                const isDutchAvailable = translatedLangs.includes('dutch') || translatedLangs.includes('nederlands');
 
                 // Strict filtering for series to prevent wrong episode matches
                 if (type === 'series' && season && episode) {
@@ -144,19 +124,21 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                 if (href && href.startsWith('subs/')) {
                     const parts = href.split('/');
                     const subId = parts[1];
-                    // Keep the filename as it is in the URL (encoded)
                     const filename = parts[2].replace('.html', '');
                     
                     const baseUrl = host ? `https://${host}` : '';
                     const dutchProxyUrl = `${baseUrl}/proxy/${subId}/${filename}/dutch.srt`;
                     const originalProxyUrl = `${baseUrl}/proxy/${subId}/${filename}.srt`;
 
+                    const statusIcon = isDutchAvailable ? '✅' : '⏳';
+                    const statusText = isDutchAvailable ? 'Direct beschikbaar' : 'WACHT 20 SEC!';
+
                     // Always add Dutch translation
                     localResults.push({
                         url: dutchProxyUrl,
                         lang: 'nld',
                         id: `${subId}-${filename}-nld`,
-                        label: `SubtitleCat: ${title} (NL Vertaling - WACHT 20 SEC!)`
+                        label: `${statusIcon} SubtitleCat: ${title} (${statusText})`
                     });
 
                     const mappedLang = mapLanguage(rawLang);
@@ -170,11 +152,11 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                     }
                 }
             });
-            return localResults;
-        });
-
-        const resultsArray = await Promise.all(searchPromises);
-        allResults = resultsArray.flat();
+            
+            allResults = [...allResults, ...localResults];
+            if (allResults.length >= 10) break; // Stop if we have enough
+            await new Promise(resolve => setTimeout(resolve, 500)); // Small delay between variations
+        }
         
         // Remove duplicates and limit results
         const uniqueResults = Array.from(new Map(allResults.map(item => [item.url, item])).values()).slice(0, 20);
@@ -448,9 +430,12 @@ async function createServer() {
                         filename.replace(/\./g, '_'),
                         filename.replace(/'/g, ''),
                         filename.replace(/'/g, '-'),
+                        filename.replace(/'/g, '.'),
                         filename.replace(/'s/g, 's'),
+                        filename.replace(/'s/g, '.s'),
                         baseName.replace(/'/g, ''),
                         baseName.replace(/'/g, '-'),
+                        baseName.replace(/'/g, '.'),
                         baseName.replace(/'s/g, 's')
                     ];
 
