@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v68',
-    version: '1.6.8',
-    name: 'SubtitleCat (v68) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v68)',
+    id: 'org.subtitlecat.v69',
+    version: '1.6.9',
+    name: 'SubtitleCat (v69) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v69)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -314,12 +314,24 @@ async function createServer() {
                 // Strict SRT Validation & Cleaning
                 let srtContent = res.data;
                 
-                // Remove BOM if present and normalize line endings to LF
-                srtContent = srtContent.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                // 1. Remove BOM if present
+                srtContent = srtContent.replace(/^\uFEFF/, '');
                 
+                // 2. Remove HTML tags if accidentally scraped
+                srtContent = srtContent.replace(/<[^>]*>/g, '');
+                
+                // 3. Normalize line endings to LF
+                srtContent = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                
+                // 4. Ensure it starts with a number (SRT format)
                 const trimmed = srtContent.trim();
+                const firstDigitMatch = trimmed.match(/^\d+/);
+                if (!firstDigitMatch) {
+                    console.error(`[DEBUG] Invalid SRT start. Content snippet: ${trimmed.substring(0, 50)}`);
+                    throw new Error("Invalid SRT content received");
+                }
                 
-                // Check for basic SRT structure: number, timestamp with '-->', and text
+                // 5. Check for basic SRT structure: number, timestamp with '-->', and text
                 const isValidSrt = /^\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}/.test(trimmed);
                 
                 if (!srtContent || trimmed.length < 50 || !isValidSrt) {
