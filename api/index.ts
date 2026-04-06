@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v63',
-    version: '1.6.3',
-    name: 'SubtitleCat (v63) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v63)',
+    id: 'org.subtitlecat.v64',
+    version: '1.6.4',
+    name: 'SubtitleCat (v64) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v64)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -366,15 +366,17 @@ async function createServer() {
                         });
                         
                         $('table.table tbody tr').each((i, el) => {
-                            const currentLang = $(el).find('td:first-child').text().trim().toLowerCase();
-                            if (currentLang.includes(langName) || 
-                                (langName === 'dutch' && (currentLang.includes('nederlands') || currentLang.includes('dutch')))) {
-                                downloadPath = $(el).find('a[href^="/download/"]').attr('href') || 
-                                               $(el).find('a[href^="/subs/"]').attr('href') || '';
-                                if (downloadPath) {
-                                    console.log(`[DEBUG] Step 2: Found link in table for ${currentLang}: ${downloadPath}`);
-                                    return false;
-                                }
+                            const rowText = $(el).text().toLowerCase();
+                            const isDutchAvailable = rowText.includes('dutch') || rowText.includes('nederlands');
+                            
+                            // Look for the download link specifically
+                            const link = $(el).find('a[href^="/download/"], a[href^="/subs/"]');
+                            const href = link.attr('href');
+
+                            if (isDutchAvailable && href) {
+                                downloadPath = href;
+                                console.log(`[DEBUG] Step 2: Found direct link in table: ${downloadPath}`);
+                                return false; // Break each
                             }
                         });
 
