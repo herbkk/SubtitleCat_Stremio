@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v70',
-    version: '1.7.0',
-    name: 'SubtitleCat (v70) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v70)',
+    id: 'org.subtitlecat.v71',
+    version: '1.7.1',
+    name: 'SubtitleCat (v71) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v71)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -384,7 +384,6 @@ async function createServer() {
                         });
                         
                         const $ = cheerio.load(pageRes.data);
-                        let downloadPath = '';
                         
                         // Debug: log all links found on the page
                         $('a').each((i, el) => {
@@ -394,6 +393,10 @@ async function createServer() {
                             }
                         });
                         
+                        let bestMatchPath = '';
+                        let firstDutchPath = '';
+                        let downloadPath = '';
+
                         $('table.table tbody tr').each((i, el) => {
                             const rowText = $(el).text().toLowerCase();
                             const isDutchAvailable = rowText.includes('dutch') || rowText.includes('nederlands');
@@ -401,13 +404,27 @@ async function createServer() {
                             // Look for the download link specifically
                             const link = $(el).find('a[href^="/download/"], a[href^="/subs/"]');
                             const href = link.attr('href');
+                            const linkText = link.text().toLowerCase();
 
                             if (isDutchAvailable && href) {
-                                downloadPath = href;
-                                console.log(`[DEBUG] Step 2: Found direct link in table: ${downloadPath}`);
-                                return false; // Break each
+                                if (!firstDutchPath) firstDutchPath = href;
+                                
+                                // Check if the link text or href matches our requested filename
+                                const filenameMatch = filename.toLowerCase().replace(/[^a-z0-9]/g, '');
+                                const linkMatch = (linkText + href).toLowerCase().replace(/[^a-z0-9]/g, '');
+                                
+                                if (linkMatch.includes(filenameMatch) || filenameMatch.includes(linkMatch.substring(0, Math.min(linkMatch.length, 10)))) {
+                                    bestMatchPath = href;
+                                    console.log(`[DEBUG] Step 2: Found best match link in table: ${bestMatchPath}`);
+                                    return false; // Break each, found perfect match
+                                }
                             }
                         });
+                        
+                        downloadPath = bestMatchPath || firstDutchPath;
+                        if (downloadPath) {
+                            console.log(`[DEBUG] Step 2: Using link: ${downloadPath}`);
+                        }
 
                         if (!downloadPath && (langName === 'english' || !lang)) {
                             downloadPath = $('#download_file').attr('href') || 
