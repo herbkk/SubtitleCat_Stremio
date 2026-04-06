@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v51',
-    version: '1.5.1',
-    name: 'SubtitleCat (v51) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v51)',
+    id: 'org.subtitlecat.v52',
+    version: '1.5.2',
+    name: 'SubtitleCat (v52) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v52)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -297,42 +297,58 @@ async function createServer() {
 
             // Strategy 1: Scrape the page to find the EXACT link (Most Reliable)
             try {
-                // Use the full filename for the scrape URL as SubtitleCat might be sensitive to it
-                const pageUrl = `https://subtitlecat.com/subs/${id}/${filename}.html`;
-                console.log(`[DEBUG] Step 2: Scraping page for real link: ${pageUrl}`);
-                const pageRes = await axios.get(pageUrl, {
-                    headers: commonHeaders,
-                    timeout: 10000
-                });
-                const $ = cheerio.load(pageRes.data);
-                
-                let downloadPath = '';
-                $('table.table tbody tr').each((i, el) => {
-                    const currentLang = $(el).find('td:first-child').text().trim().toLowerCase();
-                    // Flexible matching for language
-                    if (currentLang.includes(langName) || 
-                        (langName === 'dutch' && (currentLang.includes('nederlands') || currentLang.includes('dutch')))) {
-                        downloadPath = $(el).find('a[href^="/download/"]').attr('href') || 
-                                       $(el).find('a[href^="/subs/"]').attr('href') || '';
-                        if (downloadPath) {
-                            console.log(`[DEBUG] Step 2: Found link in table for ${currentLang}: ${downloadPath}`);
-                            return false; // Break loop
+                // Try multiple scrape URLs: full filename and ID-only
+                const scrapeUrls = [
+                    `https://subtitlecat.com/subs/${id}`,
+                    `https://subtitlecat.com/subs/${id}/${filename}.html`
+                ];
+
+                for (const pageUrl of scrapeUrls) {
+                    console.log(`[DEBUG] Step 2: Scraping page for real link: ${pageUrl}`);
+                    try {
+                        const pageRes = await axios.get(pageUrl, {
+                            headers: {
+                                ...commonHeaders,
+                                'Referer': 'https://subtitlecat.com/'
+                            },
+                            timeout: 8000,
+                            maxRedirects: 5
+                        });
+                        
+                        const $ = cheerio.load(pageRes.data);
+                        let downloadPath = '';
+                        
+                        // Try to find the specific language in the table
+                        $('table.table tbody tr').each((i, el) => {
+                            const currentLang = $(el).find('td:first-child').text().trim().toLowerCase();
+                            if (currentLang.includes(langName) || 
+                                (langName === 'dutch' && (currentLang.includes('nederlands') || currentLang.includes('dutch')))) {
+                                downloadPath = $(el).find('a[href^="/download/"]').attr('href') || 
+                                               $(el).find('a[href^="/subs/"]').attr('href') || '';
+                                if (downloadPath) {
+                                    console.log(`[DEBUG] Step 2: Found link in table for ${currentLang}: ${downloadPath}`);
+                                    return false;
+                                }
+                            }
+                        });
+
+                        if (!downloadPath && (langName === 'english' || !lang)) {
+                            downloadPath = $('#download_file').attr('href') || 
+                                           $('a.btn-primary[href^="/download/"]').attr('href') || '';
                         }
+
+                        if (downloadPath) {
+                            const fullUrl = downloadPath.startsWith('http') ? downloadPath : `https://subtitlecat.com${downloadPath}`;
+                            response = await fetchFile(fullUrl);
+                            success = true;
+                            break;
+                        }
+                    } catch (e: any) {
+                        console.log(`[DEBUG] Scrape attempt failed for ${pageUrl}: ${e.message}`);
                     }
-                });
-
-                if (!downloadPath && (langName === 'english' || !lang)) {
-                    downloadPath = $('#download_file').attr('href') || 
-                                   $('a.btn-primary[href^="/download/"]').attr('href') || '';
-                }
-
-                if (downloadPath) {
-                    const fullUrl = downloadPath.startsWith('http') ? downloadPath : `https://subtitlecat.com${downloadPath}`;
-                    response = await fetchFile(fullUrl);
-                    success = true;
                 }
             } catch (scrapeErr: any) {
-                console.log(`[DEBUG] Scrape failed: ${scrapeErr.message}`);
+                console.log(`[DEBUG] Scrape logic failed: ${scrapeErr.message}`);
             }
 
             // Strategy 2: Brute-force patterns (Fallback)
@@ -343,19 +359,31 @@ async function createServer() {
                 
                 if (lang) {
                     const langSuffix = langName === 'dutch' ? 'nl' : langName.substring(0, 2);
-                    pathsToTry.push(`${filename}/${langName}.srt`);
-                    pathsToTry.push(`${baseName}/${langName}.srt`);
-                    pathsToTry.push(`${baseName}-${langSuffix}.srt`);
-                    pathsToTry.push(`${filename}-${langSuffix}.srt`);
-                    // Try with comma replaced by space or removed
+                    const variations = [
+                        filename,
+                        baseName,
+                        filename.replace(/ /g, '-'),
+                        filename.replace(/ /g, '_'),
+                        baseName.replace(/ /g, '-'),
+                        baseName.replace(/ /g, '_')
+                    ];
+
+                    for (const v of Array.from(new Set(variations))) {
+                        pathsToTry.push(`${v}/${langName}.srt`);
+                        pathsToTry.push(`${v}-${langSuffix}.srt`);
+                    }
+                    
+                    // Try with comma variations
                     if (filename.includes(',')) {
                         const noComma = filename.replace(/,/g, '');
                         pathsToTry.push(`${noComma}/${langName}.srt`);
                         pathsToTry.push(`${noComma}-${langSuffix}.srt`);
+                        pathsToTry.push(`${noComma.replace(/ /g, '-')}-${langSuffix}.srt`);
                     }
                 } else {
                     pathsToTry.push(filename.endsWith('.srt') ? filename : `${filename}.srt`);
                     pathsToTry.push(baseName + '.srt');
+                    pathsToTry.push(baseName.replace(/ /g, '-') + '.srt');
                 }
 
                 const strategies = [
@@ -373,7 +401,10 @@ async function createServer() {
                                 const char = cleanPath[i];
                                 if (char === ' ') {
                                     encodedPath += strat.plus ? '+' : '%20';
-                                } else if (/[a-zA-Z0-9\+\-\.\_\/\(\)\[\],]/.test(char)) {
+                                } else if (char === '+') {
+                                    // If it's a literal plus, encode it to %2B to avoid being treated as space
+                                    encodedPath += '%2B';
+                                } else if (/[a-zA-Z0-9\-\.\_\/\(\)\[\],]/.test(char)) {
                                     encodedPath += char;
                                 } else {
                                     encodedPath += encodeURIComponent(char);
