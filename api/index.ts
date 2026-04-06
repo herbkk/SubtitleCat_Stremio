@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v52',
-    version: '1.5.2',
-    name: 'SubtitleCat (v52) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v52)',
+    id: 'org.subtitlecat.v53',
+    version: '1.5.3',
+    name: 'SubtitleCat (v53) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v53)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -110,7 +110,7 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                         url: dutchProxyUrl,
                         lang: 'nld',
                         id: `${subId}-${filename}-nld`,
-                        label: `SubtitleCat: ${title} (NL)`
+                        label: `SubtitleCat: ${title} (NL Vertaling)`
                     });
 
                     const mappedLang = mapLanguage(rawLang);
@@ -354,6 +354,17 @@ async function createServer() {
             // Strategy 2: Brute-force patterns (Fallback)
             if (!success) {
                 console.log(`[DEBUG] Scrape didn't work, falling back to brute-force...`);
+                
+                // If we are looking for Dutch and it failed, try to "trigger" the generation
+                // by visiting the main page first if we haven't already
+                if (langName === 'dutch') {
+                    console.log(`[DEBUG] Triggering generation for Dutch by visiting base page...`);
+                    await axios.get(`https://subtitlecat.com/subs/${id}`, {
+                        headers: commonHeaders,
+                        timeout: 5000
+                    }).catch(() => null);
+                }
+
                 const baseName = filename.replace(/\.srt$/i, '');
                 const pathsToTry: string[] = [];
                 
@@ -391,35 +402,47 @@ async function createServer() {
                     { plus: true, subs: true }, { plus: false, subs: true }
                 ];
 
-                for (const pathAttempt of pathsToTry) {
-                    for (const strat of strategies) {
-                        try {
-                            const cleanPath = decodeURIComponent(pathAttempt);
-                            let encodedPath = "";
-                            // Manual encoding to prevent double encoding and allow specific characters
-                            for (let i = 0; i < cleanPath.length; i++) {
-                                const char = cleanPath[i];
-                                if (char === ' ') {
-                                    encodedPath += strat.plus ? '+' : '%20';
-                                } else if (char === '+') {
-                                    // If it's a literal plus, encode it to %2B to avoid being treated as space
-                                    encodedPath += '%2B';
-                                } else if (/[a-zA-Z0-9\-\.\_\/\(\)\[\],]/.test(char)) {
-                                    encodedPath += char;
-                                } else {
-                                    encodedPath += encodeURIComponent(char);
-                                }
-                            }
-                            
-                            const prefix = strat.subs ? 'subs' : 'download';
-                            const url = `https://subtitlecat.com/${prefix}/${id}/${encodedPath}`;
-                            
-                            response = await fetchFile(url);
-                            success = true;
-                            break;
-                        } catch (e) { /* continue */ }
+                // Attempt loop with retry for Dutch
+                let attempts = 0;
+                const maxAttempts = langName === 'dutch' ? 2 : 1;
+
+                while (attempts < maxAttempts && !success) {
+                    if (attempts > 0) {
+                        console.log(`[DEBUG] Retry ${attempts} for Dutch... waiting 6 seconds for generation...`);
+                        await new Promise(resolve => setTimeout(resolve, 6000));
                     }
-                    if (success) break;
+
+                    for (const pathAttempt of pathsToTry) {
+                        for (const strat of strategies) {
+                            try {
+                                const cleanPath = decodeURIComponent(pathAttempt);
+                                let encodedPath = "";
+                                // Manual encoding to prevent double encoding and allow specific characters
+                                for (let i = 0; i < cleanPath.length; i++) {
+                                    const char = cleanPath[i];
+                                    if (char === ' ') {
+                                        encodedPath += strat.plus ? '+' : '%20';
+                                    } else if (char === '+') {
+                                        // If it's a literal plus, encode it to %2B to avoid being treated as space
+                                        encodedPath += '%2B';
+                                    } else if (/[a-zA-Z0-9\-\.\_\/\(\)\[\],]/.test(char)) {
+                                        encodedPath += char;
+                                    } else {
+                                        encodedPath += encodeURIComponent(char);
+                                    }
+                                }
+                                
+                                const prefix = strat.subs ? 'subs' : 'download';
+                                const url = `https://subtitlecat.com/${prefix}/${id}/${encodedPath}`;
+                                
+                                response = await fetchFile(url);
+                                success = true;
+                                break;
+                            } catch (e) { /* continue */ }
+                        }
+                        if (success) break;
+                    }
+                    attempts++;
                 }
             }
 
