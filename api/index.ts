@@ -424,10 +424,16 @@ async function createServer() {
                         filename.replace(/'/g, '.'),
                         filename.replace(/'s/g, 's'),
                         filename.replace(/'s/g, '.s'),
+                        filename.replace(/,/g, ''),
+                        filename.replace(/,/g, '-'),
+                        filename.replace(/,/g, '.'),
                         baseName.replace(/'/g, ''),
                         baseName.replace(/'/g, '-'),
                         baseName.replace(/'/g, '.'),
-                        baseName.replace(/'s/g, 's')
+                        baseName.replace(/'s/g, 's'),
+                        baseName.replace(/,/g, ''),
+                        baseName.replace(/,/g, '-'),
+                        baseName.replace(/,/g, '.')
                     ];
 
                     // Add common subtitle suffixes before the lang suffix
