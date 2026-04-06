@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v58',
-    version: '1.5.8',
-    name: 'SubtitleCat (v58) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v58)',
+    id: 'org.subtitlecat.v59',
+    version: '1.5.9',
+    name: 'SubtitleCat (v59) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v59)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -53,13 +53,23 @@ function mapLanguage(lang: string): string | null {
     return LANG_MAP[cleanLang] || null;
 }
 
-async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string, host?: string) {
+async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string, host?: string, imdbId?: string, year?: string) {
     try {
         // Clean title: remove year in brackets like "Title (2024)" -> "Title"
         let cleanTitle = query.replace(/\s\(\d{4}\)$/, '').trim();
         
         // Try multiple search variations
         const searchQueries = [cleanTitle];
+        
+        // Add IMDb ID if available
+        if (imdbId) {
+            searchQueries.push(imdbId);
+        }
+
+        // Add title + year
+        if (year) {
+            searchQueries.push(`${cleanTitle} ${year}`);
+        }
         
         // Variation: replace & with and
         if (cleanTitle.includes('&')) {
@@ -95,9 +105,12 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
             const searchUrl = `https://subtitlecat.com/index.php?search=${encodeURIComponent(q)}`;
             const response = await axios.get(searchUrl, {
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Referer': 'https://subtitlecat.com/'
                 },
-                timeout: 4000
+                timeout: 6000
             }).catch(() => null);
 
             if (!response || !response.data) return [];
@@ -116,11 +129,14 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                 if (type === 'series' && season && episode) {
                     const s = season.padStart(2, '0');
                     const e = episode.padStart(2, '0');
+                    const sNum = parseInt(season);
+                    const eNum = parseInt(episode);
                     const pattern1 = new RegExp(`S${s}E${e}`, 'i');
                     const pattern2 = new RegExp(`${season}x${episode}`, 'i');
                     const pattern3 = new RegExp(`${s}x${e}`, 'i');
+                    const pattern4 = new RegExp(`S${sNum}E${eNum}`, 'i');
                     
-                    if (!pattern1.test(title) && !pattern2.test(title) && !pattern3.test(title)) {
+                    if (!pattern1.test(title) && !pattern2.test(title) && !pattern3.test(title) && !pattern4.test(title)) {
                         return; // Skip this result
                     }
                 }
@@ -265,7 +281,9 @@ async function createServer() {
             }
 
             const host = req.headers.host;
-            const allSubtitles = await searchSubtitleCat(meta.name, type, season, episode, host);
+            const imdbId = cleanId.split(':')[0];
+            const year = meta.year || meta.releaseInfo;
+            const allSubtitles = await searchSubtitleCat(meta.name, type, season, episode, host, imdbId, year);
             
             // STRICT FILTERING: Only return the language Stremio asked for
             // If no language is requested, default to Dutch for this addon
@@ -296,6 +314,7 @@ async function createServer() {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Cache-Control': 'no-cache',
             'Pragma': 'no-cache',
             'Sec-Ch-Ua': '"Chromium";v="123", "Not:A-Brand";v="8"',
@@ -425,10 +444,14 @@ async function createServer() {
                         baseName,
                         filename.replace(/ /g, '-'),
                         filename.replace(/ /g, '_'),
+                        filename.replace(/\./g, '-'),
+                        filename.replace(/\./g, '_'),
                         filename.replace(/'/g, ''),
                         filename.replace(/'/g, '-'),
+                        filename.replace(/'s/g, 's'),
                         baseName.replace(/'/g, ''),
-                        baseName.replace(/'/g, '-')
+                        baseName.replace(/'/g, '-'),
+                        baseName.replace(/'s/g, 's')
                     ];
 
                     // Add common subtitle suffixes before the lang suffix
@@ -463,11 +486,11 @@ async function createServer() {
 
                 // Attempt loop with retry for Dutch
                 let attempts = 0;
-                const maxAttempts = langName === 'dutch' ? 3 : 1;
+                const maxAttempts = langName === 'dutch' ? 4 : 1;
 
                 while (attempts < maxAttempts && !success) {
                     if (attempts > 0) {
-                        const waitTime = attempts === 1 ? 12000 : 8000;
+                        const waitTime = attempts === 1 ? 10000 : 7000;
                         console.log(`[DEBUG] Retry ${attempts} for Dutch... waiting ${waitTime/1000} seconds for generation...`);
                         await new Promise(resolve => setTimeout(resolve, waitTime));
                     }
@@ -509,7 +532,7 @@ async function createServer() {
 
             if (!success || !response) {
                 console.log(`[DEBUG] All strategies failed for ${id}. Returning dummy SRT error message.`);
-                const dummySrt = "1\n00:00:01,000 --> 00:00:10,000\nSubtitleCat generatie duurt te lang of is mislukt.\nProbeer het over 1 minuut nogmaals.";
+                const dummySrt = "1\n00:00:01,000 --> 00:00:15,000\nSubtitleCat: NL Vertaling mislukt.\n\nOorzaak: SubtitleCat blokkeert de aanvraag (403)\nof de vertaling is nog niet klaar (404).\n\nProbeer een andere versie of wacht 1 minuut.";
                 res.setHeader('Content-Type', 'text/plain; charset=utf-8');
                 res.setHeader('Access-Control-Allow-Origin', '*');
                 return res.send(dummySrt);
