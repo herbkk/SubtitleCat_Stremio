@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v71',
-    version: '1.7.1',
-    name: 'SubtitleCat (v71) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v71)',
+    id: 'org.subtitlecat.v73',
+    version: '1.7.3',
+    name: 'SubtitleCat (v73) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v73)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -300,7 +300,7 @@ async function createServer() {
             console.log(`[DEBUG] Step 3: Final Download Attempt: ${url}`);
             try {
                 const res = await axios.get(url, {
-                    responseType: 'text', // Get as text to validate
+                    responseType: 'arraybuffer', // Get as buffer for robust encoding
                     headers: {
                         ...commonHeaders,
                         'Cookie': currentCookies.join('; '),
@@ -311,8 +311,9 @@ async function createServer() {
                     validateStatus: (status) => status === 200
                 });
                 
-                // Strict SRT Validation & Cleaning
-                let srtContent = res.data;
+                // Convert to UTF-8
+                const decoder = new TextDecoder('utf-8');
+                let srtContent = decoder.decode(res.data);
                 
                 // 1. Remove BOM if present
                 srtContent = srtContent.replace(/^\uFEFF/, '');
@@ -323,19 +324,11 @@ async function createServer() {
                 // 3. Normalize line endings to LF
                 srtContent = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
                 
-                // 4. Ensure it starts with a number (SRT format)
                 const trimmed = srtContent.trim();
-                const firstDigitMatch = trimmed.match(/^\d+/);
-                if (!firstDigitMatch) {
-                    console.error(`[DEBUG] Invalid SRT start. Content snippet: ${trimmed.substring(0, 50)}`);
-                    throw new Error("Invalid SRT content received");
-                }
                 
-                // 5. Check for basic SRT structure: number, timestamp with '-->', and text
-                const isValidSrt = /^\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}/.test(trimmed);
-                
-                if (!srtContent || trimmed.length < 50 || !isValidSrt) {
-                    console.error(`[DEBUG] Invalid SRT content detected. Length: ${trimmed.length}, Valid format: ${isValidSrt}`);
+                // 4. Flexible Validation: Must contain timestamp indicator
+                if (!trimmed || trimmed.length < 20 || !trimmed.includes('-->')) {
+                    console.error(`[DEBUG] Invalid SRT content detected. Length: ${trimmed.length}`);
                     throw new Error("Invalid SRT content received");
                 }
 
@@ -426,7 +419,7 @@ async function createServer() {
                             console.log(`[DEBUG] Step 2: Using link: ${downloadPath}`);
                         }
 
-                        if (!downloadPath && (langName === 'english' || !lang)) {
+                        if (!downloadPath) {
                             downloadPath = $('#download_file').attr('href') || 
                                            $('a.btn-primary[href^="/download/"]').attr('href') || '';
                         }
@@ -504,11 +497,8 @@ async function createServer() {
             }
 
             if (!success || !response) {
-                console.log(`[DEBUG] All strategies failed for ${id}. Returning dummy SRT error message.`);
-                const dummySrt = "1\n00:00:01,000 --> 00:00:15,000\nSubtitleCat: NL Vertaling mislukt.\n\nOorzaak: SubtitleCat blokkeert de aanvraag (403)\nof de vertaling is nog niet klaar (404).\n\nProbeer een andere versie of wacht 1 minuut.";
-                res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-                res.setHeader('Access-Control-Allow-Origin', '*');
-                return res.send(dummySrt);
+                console.log(`[DEBUG] All strategies failed for ${id}. Returning 404.`);
+                return res.status(404).send('Subtitle not found');
             }
 
             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
