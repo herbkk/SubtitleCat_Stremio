@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v54',
-    version: '1.5.4',
-    name: 'SubtitleCat (v54) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v54)',
+    id: 'org.subtitlecat.v55',
+    version: '1.5.5',
+    name: 'SubtitleCat (v55) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v55)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -266,7 +266,8 @@ async function createServer() {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9,nl;q=0.8',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive'
         };
 
         const fetchFile = async (url: string) => {
@@ -294,21 +295,32 @@ async function createServer() {
             console.log(`[DEBUG] Step 1: Proxy Request for ID: ${id}, Lang: ${langName}, File: ${filename}`);
             let response;
             let success = false;
+            let cookies: string[] = [];
 
-            // Strategy 1: Scrape the page to find the EXACT link (Most Reliable)
+            // Strategy 1: Stealth Scrape (Get cookies first)
             try {
-                // Try multiple scrape URLs: full filename and ID-only
+                console.log(`[DEBUG] Step 2: Initializing stealth session...`);
+                const initRes = await axios.get('https://subtitlecat.com/', {
+                    headers: commonHeaders,
+                    timeout: 5000
+                }).catch(() => null);
+                
+                if (initRes && initRes.headers['set-cookie']) {
+                    cookies = initRes.headers['set-cookie'];
+                }
+
                 const scrapeUrls = [
                     `https://subtitlecat.com/subs/${id}`,
                     `https://subtitlecat.com/subs/${id}/${filename}.html`
                 ];
 
                 for (const pageUrl of scrapeUrls) {
-                    console.log(`[DEBUG] Step 2: Scraping page for real link: ${pageUrl}`);
+                    console.log(`[DEBUG] Step 2: Scraping page with cookies: ${pageUrl}`);
                     try {
                         const pageRes = await axios.get(pageUrl, {
                             headers: {
                                 ...commonHeaders,
+                                'Cookie': cookies.join('; '),
                                 'Referer': 'https://subtitlecat.com/'
                             },
                             timeout: 8000,
@@ -318,7 +330,6 @@ async function createServer() {
                         const $ = cheerio.load(pageRes.data);
                         let downloadPath = '';
                         
-                        // Try to find the specific language in the table
                         $('table.table tbody tr').each((i, el) => {
                             const currentLang = $(el).find('td:first-child').text().trim().toLowerCase();
                             if (currentLang.includes(langName) || 
@@ -424,8 +435,9 @@ async function createServer() {
                                     if (char === ' ') {
                                         encodedPath += strat.plus ? '+' : '%20';
                                     } else if (char === '+') {
-                                        // If it's a literal plus, encode it to %2B to avoid being treated as space
-                                        encodedPath += '%2B';
+                                        // SubtitleCat often expects literal plus in some contexts, but %2B in others
+                                        // We'll try both via the plus strategy
+                                        encodedPath += strat.plus ? '+' : '%2B';
                                     } else if (/[a-zA-Z0-9\-\.\_\/\(\)\[\],]/.test(char)) {
                                         encodedPath += char;
                                     } else {

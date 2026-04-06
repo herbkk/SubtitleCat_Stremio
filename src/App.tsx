@@ -59,7 +59,7 @@ export default function App() {
             {isReady !== null && (
               <div className="flex gap-2 absolute -top-3 -right-3">
                 <div className="px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest border shadow-lg bg-indigo-500/20 border-indigo-500/40 text-indigo-400">
-                  v54
+                  v55
                 </div>
                 <div className={`px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest border shadow-lg ${isReady ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-rose-500/20 border-rose-500/40 text-rose-400'}`}>
                   {isReady ? '● Online' : '● Offline'}
@@ -87,6 +87,13 @@ export default function App() {
             Get high-quality subtitles directly from SubtitleCat.com in your Stremio player. 
             Supports movies and TV series in multiple languages.
           </p>
+
+          <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 mb-8 text-center max-w-2xl mx-auto">
+            <p className="text-slate-400 text-sm">
+              <span className="text-indigo-400 font-bold">Tip:</span> Het laden van een nieuwe NL vertaling kan tot <span className="text-white font-bold">20 seconden</span> duren. 
+              Heb geduld nadat je de ondertiteling selecteert in Stremio.
+            </p>
+          </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-8">
             <a
