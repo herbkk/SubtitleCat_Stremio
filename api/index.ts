@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v65',
-    version: '1.6.5',
-    name: 'SubtitleCat (v65) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v65)',
+    id: 'org.subtitlecat.v66',
+    version: '1.6.6',
+    name: 'SubtitleCat (v66) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v66)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -313,11 +313,17 @@ async function createServer() {
                 
                 // Strict SRT Validation
                 const srtContent = res.data;
-                if (!srtContent || srtContent.trim().length === 0 || !/^\d+\n\d{2}:\d{2}:\d{2}/.test(srtContent.trim())) {
+                const trimmed = srtContent.trim();
+                
+                // Check for basic SRT structure: number, timestamp with '-->', and text
+                const isValidSrt = /^\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}/.test(trimmed);
+                
+                if (!srtContent || trimmed.length < 50 || !isValidSrt) {
+                    console.error(`[DEBUG] Invalid SRT content detected. Length: ${trimmed.length}, Valid format: ${isValidSrt}`);
                     throw new Error("Invalid SRT content received");
                 }
 
-                console.log(`[DEBUG] Step 4: Download Success! Size: ${srtContent.length} bytes`);
+                console.log(`[DEBUG] Step 4: Download Success! Serving SRT snippet: ${trimmed.substring(0, 100)}`);
                 return srtContent;
             } catch (err: any) {
                 console.error(`[DEBUG] Step 4: Download Failed! Status: ${err.response?.status}, Message: ${err.message}`);
