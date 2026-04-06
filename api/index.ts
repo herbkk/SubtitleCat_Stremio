@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v53',
-    version: '1.5.3',
-    name: 'SubtitleCat (v53) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v53)',
+    id: 'org.subtitlecat.v54',
+    version: '1.5.4',
+    name: 'SubtitleCat (v54) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v54)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -404,12 +404,13 @@ async function createServer() {
 
                 // Attempt loop with retry for Dutch
                 let attempts = 0;
-                const maxAttempts = langName === 'dutch' ? 2 : 1;
+                const maxAttempts = langName === 'dutch' ? 3 : 1;
 
                 while (attempts < maxAttempts && !success) {
                     if (attempts > 0) {
-                        console.log(`[DEBUG] Retry ${attempts} for Dutch... waiting 6 seconds for generation...`);
-                        await new Promise(resolve => setTimeout(resolve, 6000));
+                        const waitTime = attempts === 1 ? 12000 : 6000;
+                        console.log(`[DEBUG] Retry ${attempts} for Dutch... waiting ${waitTime/1000} seconds for generation...`);
+                        await new Promise(resolve => setTimeout(resolve, waitTime));
                     }
 
                     for (const pathAttempt of pathsToTry) {
@@ -446,7 +447,13 @@ async function createServer() {
                 }
             }
 
-            if (!success || !response) throw new Error('All download strategies failed');
+            if (!success || !response) {
+                console.log(`[DEBUG] All strategies failed for ${id}. Returning dummy SRT error message.`);
+                const dummySrt = "1\n00:00:01,000 --> 00:00:10,000\nSubtitleCat generatie duurt te lang of is mislukt.\nProbeer het over 1 minuut nogmaals.";
+                res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                return res.send(dummySrt);
+            }
 
             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
