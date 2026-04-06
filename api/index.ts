@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v64',
-    version: '1.6.4',
-    name: 'SubtitleCat (v64) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v64)',
+    id: 'org.subtitlecat.v65',
+    version: '1.6.5',
+    name: 'SubtitleCat (v65) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v65)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -300,7 +300,7 @@ async function createServer() {
             console.log(`[DEBUG] Step 3: Final Download Attempt: ${url}`);
             try {
                 const res = await axios.get(url, {
-                    responseType: 'arraybuffer',
+                    responseType: 'text', // Get as text to validate
                     headers: {
                         ...commonHeaders,
                         'Cookie': currentCookies.join('; '),
@@ -310,8 +310,15 @@ async function createServer() {
                     maxRedirects: 5,
                     validateStatus: (status) => status === 200
                 });
-                console.log(`[DEBUG] Step 4: Download Success! Size: ${res.data.length} bytes`);
-                return res;
+                
+                // Strict SRT Validation
+                const srtContent = res.data;
+                if (!srtContent || srtContent.trim().length === 0 || !/^\d+\n\d{2}:\d{2}:\d{2}/.test(srtContent.trim())) {
+                    throw new Error("Invalid SRT content received");
+                }
+
+                console.log(`[DEBUG] Step 4: Download Success! Size: ${srtContent.length} bytes`);
+                return srtContent;
             } catch (err: any) {
                 console.error(`[DEBUG] Step 4: Download Failed! Status: ${err.response?.status}, Message: ${err.message}`);
                 throw err;
@@ -387,9 +394,10 @@ async function createServer() {
 
                         if (downloadPath) {
                             const fullUrl = downloadPath.startsWith('http') ? downloadPath : `https://subtitlecat.com${downloadPath}`;
-                            response = await fetchFile(fullUrl, cookies);
-                            success = true;
-                            break;
+                            const srtContent = await fetchFile(fullUrl, cookies);
+                            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+                            res.setHeader('Access-Control-Allow-Origin', '*');
+                            return res.send(srtContent);
                         }
                     } catch (e: any) {
                         console.log(`[DEBUG] Scrape attempt failed for ${pageUrl}: ${e.message}`);
