@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v69',
-    version: '1.6.9',
-    name: 'SubtitleCat (v69) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v69)',
+    id: 'org.subtitlecat.v70',
+    version: '1.7.0',
+    name: 'SubtitleCat (v70) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v70)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -415,7 +415,9 @@ async function createServer() {
                         }
 
                         if (downloadPath) {
-                            const fullUrl = downloadPath.startsWith('http') ? downloadPath : `https://subtitlecat.com${downloadPath}`;
+                            // Ensure the URL is absolute
+                            const fullUrl = downloadPath.startsWith('http') ? downloadPath : `https://subtitlecat.com${downloadPath.startsWith('/') ? '' : '/'}${downloadPath}`;
+                            console.log(`[DEBUG] Step 3: Final Download Attempt: ${fullUrl}`);
                             const srtContent = await fetchFile(fullUrl, cookies);
                             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
                             res.setHeader('Access-Control-Allow-Origin', '*');
