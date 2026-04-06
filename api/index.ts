@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v67',
-    version: '1.6.7',
-    name: 'SubtitleCat (v67) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v67)',
+    id: 'org.subtitlecat.v68',
+    version: '1.6.8',
+    name: 'SubtitleCat (v68) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v68)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -311,8 +311,12 @@ async function createServer() {
                     validateStatus: (status) => status === 200
                 });
                 
-                // Strict SRT Validation
-                const srtContent = res.data;
+                // Strict SRT Validation & Cleaning
+                let srtContent = res.data;
+                
+                // Remove BOM if present and normalize line endings to LF
+                srtContent = srtContent.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                
                 const trimmed = srtContent.trim();
                 
                 // Check for basic SRT structure: number, timestamp with '-->', and text
