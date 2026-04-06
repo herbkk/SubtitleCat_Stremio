@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v61',
-    version: '1.6.1',
-    name: 'SubtitleCat (v61) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v61)',
+    id: 'org.subtitlecat.v62',
+    version: '1.6.2',
+    name: 'SubtitleCat (v62) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v62)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
