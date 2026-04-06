@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v55',
-    version: '1.5.5',
-    name: 'SubtitleCat (v55) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v55)',
+    id: 'org.subtitlecat.v56',
+    version: '1.5.6',
+    name: 'SubtitleCat (v56) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v56)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -95,6 +95,19 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                 const href = link.attr('href');
                 const rawLang = $(el).find('td:nth-child(2)').text().trim();
 
+                // Strict filtering for series to prevent wrong episode matches
+                if (type === 'series' && season && episode) {
+                    const s = season.padStart(2, '0');
+                    const e = episode.padStart(2, '0');
+                    const pattern1 = new RegExp(`S${s}E${e}`, 'i');
+                    const pattern2 = new RegExp(`${season}x${episode}`, 'i');
+                    const pattern3 = new RegExp(`${s}x${e}`, 'i');
+                    
+                    if (!pattern1.test(title) && !pattern2.test(title) && !pattern3.test(title)) {
+                        return; // Skip this result
+                    }
+                }
+
                 if (href && href.startsWith('subs/')) {
                     const parts = href.split('/');
                     const subId = parts[1];
@@ -110,7 +123,7 @@ async function searchSubtitleCat(query: string, type: string, season?: string, e
                         url: dutchProxyUrl,
                         lang: 'nld',
                         id: `${subId}-${filename}-nld`,
-                        label: `SubtitleCat: ${title} (NL Vertaling)`
+                        label: `SubtitleCat: ${title} (NL Vertaling - WACHT 20 SEC!)`
                     });
 
                     const mappedLang = mapLanguage(rawLang);
