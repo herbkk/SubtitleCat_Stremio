@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v66',
-    version: '1.6.6',
-    name: 'SubtitleCat (v66) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v66)',
+    id: 'org.subtitlecat.v67',
+    version: '1.6.7',
+    name: 'SubtitleCat (v67) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v67)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -415,8 +415,57 @@ async function createServer() {
 
             // Strategy 2: Brute-force patterns (Fallback)
             if (!success) {
-                console.log(`[DEBUG] Scrape didn't work, brute-force disabled in v63 to prevent 404 spam.`);
-                // Brute-force is disabled to prevent 404 spam and focus on scraping
+                console.log(`[DEBUG] Scrape didn't work, falling back to brute-force with cookies...`);
+                
+                const baseName = filename.replace(/\.srt$/i, '');
+                const pathsToTry: string[] = [];
+                
+                if (lang) {
+                    const langSuffix = langName === 'dutch' ? 'nl' : langName.substring(0, 2);
+                    const variations = [
+                        filename,
+                        baseName,
+                        filename.replace(/ /g, '-'),
+                        filename.replace(/ /g, '_'),
+                        filename.replace(/\./g, '-'),
+                        filename.replace(/\./g, '_'),
+                        filename.replace(/'/g, ''),
+                        filename.replace(/'/g, '-'),
+                        filename.replace(/'/g, '.'),
+                        filename.replace(/'s/g, 's'),
+                        filename.replace(/'s/g, '.s'),
+                        filename.replace(/,/g, ''),
+                        filename.replace(/,/g, '-'),
+                        filename.replace(/,/g, '.'),
+                        baseName.replace(/'/g, ''),
+                        baseName.replace(/'/g, '-'),
+                        baseName.replace(/'/g, '.'),
+                        baseName.replace(/'s/g, 's'),
+                        baseName.replace(/,/g, ''),
+                        baseName.replace(/,/g, '-'),
+                        baseName.replace(/,/g, '.')
+                    ];
+
+                    for (const v of Array.from(new Set(variations))) {
+                        pathsToTry.push(`${v}/${langName}.srt`);
+                        pathsToTry.push(`${v}-${langSuffix}.srt`);
+                    }
+                } else {
+                    pathsToTry.push(filename.endsWith('.srt') ? filename : `${filename}.srt`);
+                    pathsToTry.push(baseName + '.srt');
+                }
+
+                for (const pathAttempt of pathsToTry) {
+                    try {
+                        const encodedPath = encodeURIComponent(pathAttempt);
+                        const url = `https://subtitlecat.com/download/${id}/${encodedPath}`;
+                        
+                        const srtContent = await fetchFile(url, cookies);
+                        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+                        res.setHeader('Access-Control-Allow-Origin', '*');
+                        return res.send(srtContent);
+                    } catch (e) { /* continue */ }
+                }
             }
 
             if (!success || !response) {
