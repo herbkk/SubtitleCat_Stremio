@@ -5,10 +5,10 @@ import * as cheerio from 'cheerio';
 import cors from 'cors';
 
 const MANIFEST = {
-    id: 'org.subtitlecat.v56',
-    version: '1.5.6',
-    name: 'SubtitleCat (v56) - NL Vertalingen',
-    description: 'Ondertitels van SubtitleCat.com (v56)',
+    id: 'org.subtitlecat.v58',
+    version: '1.5.8',
+    name: 'SubtitleCat (v58) - NL Vertalingen',
+    description: 'Ondertitels van SubtitleCat.com (v58)',
     logo: 'https://cdn-icons-png.flaticon.com/512/3503/3503844.png',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -56,15 +56,32 @@ function mapLanguage(lang: string): string | null {
 async function searchSubtitleCat(query: string, type: string, season?: string, episode?: string, host?: string) {
     try {
         // Clean title: remove year in brackets like "Title (2024)" -> "Title"
-        const cleanTitle = query.replace(/\s\(\d{4}\)$/, '').trim();
+        let cleanTitle = query.replace(/\s\(\d{4}\)$/, '').trim();
         
         // Try multiple search variations
         const searchQueries = [cleanTitle];
+        
+        // Variation: replace & with and
+        if (cleanTitle.includes('&')) {
+            searchQueries.push(cleanTitle.replace(/&/g, 'and'));
+        }
+        
+        // Variation: remove all special characters except spaces
+        const alphaOnly = cleanTitle.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (alphaOnly !== cleanTitle) {
+            searchQueries.push(alphaOnly);
+        }
+
         if (type === 'series' && season && episode) {
             const s = season.padStart(2, '0');
             const e = episode.padStart(2, '0');
-            searchQueries.unshift(`${cleanTitle} S${s}E${e}`);
-            searchQueries.unshift(`${cleanTitle}.${s}x${e}`);
+            
+            // Add SxxExx to all current variations
+            const currentVariations = [...searchQueries];
+            currentVariations.forEach(v => {
+                searchQueries.unshift(`${v} S${s}E${e}`);
+                searchQueries.unshift(`${v} ${s}x${e}`);
+            });
         }
         
         // Add Dutch specific searches to find native Dutch entries
@@ -277,9 +294,18 @@ async function createServer() {
 
         const commonHeaders = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9,nl;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
             'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Sec-Ch-Ua': '"Chromium";v="123", "Not:A-Brand";v="8"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
             'Connection': 'keep-alive'
         };
 
@@ -399,9 +425,18 @@ async function createServer() {
                         baseName,
                         filename.replace(/ /g, '-'),
                         filename.replace(/ /g, '_'),
-                        baseName.replace(/ /g, '-'),
-                        baseName.replace(/ /g, '_')
+                        filename.replace(/'/g, ''),
+                        filename.replace(/'/g, '-'),
+                        baseName.replace(/'/g, ''),
+                        baseName.replace(/'/g, '-')
                     ];
+
+                    // Add common subtitle suffixes before the lang suffix
+                    const baseVariations = [...variations];
+                    baseVariations.forEach(v => {
+                        variations.push(`${v}.en`);
+                        variations.push(`${v}.eng`);
+                    });
 
                     for (const v of Array.from(new Set(variations))) {
                         pathsToTry.push(`${v}/${langName}.srt`);
@@ -432,7 +467,7 @@ async function createServer() {
 
                 while (attempts < maxAttempts && !success) {
                     if (attempts > 0) {
-                        const waitTime = attempts === 1 ? 12000 : 6000;
+                        const waitTime = attempts === 1 ? 12000 : 8000;
                         console.log(`[DEBUG] Retry ${attempts} for Dutch... waiting ${waitTime/1000} seconds for generation...`);
                         await new Promise(resolve => setTimeout(resolve, waitTime));
                     }
